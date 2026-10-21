@@ -14,8 +14,12 @@
 x-backend-env: &backend-env
   NODE_ENV: production
   # Full connection strings come from .env — required, no defaults.
+  # Medusa defaults to SSL for non-localhost hosts (rejectUnauthorized=false),
+  # which matches managed/cloud PG. For a PG WITHOUT SSL, append
+  # ?sslmode=disable (no underscore), or connections will hang.
   # Examples:
-  #   DATABASE_URL=postgres://user:pass@pg.example.com:5432/medusa?sslmode=require
+  #   DATABASE_URL=postgres://user:pass@pg.example.com:5432/medusa
+  #   DATABASE_URL=postgres://user:pass@pg.example.com:5432/medusa?sslmode=disable
   #   REDIS_URL=redis://:password@redis.example.com:6379/0
   #   REDIS_URL=rediss://:password@redis.example.com:6380/0   (TLS)
   DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}

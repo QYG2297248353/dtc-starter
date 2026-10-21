@@ -14,9 +14,12 @@
 x-backend-env: &backend-env
   NODE_ENV: production
   # PostgreSQL 连接串：默认指向本文件的 db 服务。
+  # 注意：Medusa 对非 localhost 的主机默认启用 SSL，内置 db 未开 SSL，
+  # 因此必须带 ?sslmode=disable（无下划线；ssl_mode 会在框架内部被剥离后失效）。
   # 使用外部数据库时，在 .env 中直接设置完整的 DATABASE_URL 即可覆盖，例如：
-  #   DATABASE_URL=postgres://user:pass@your-pg-host:5432/medusa?sslmode=require
-  DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-medusa}:${POSTGRES_PASSWORD:-medusa}@db:5432/${POSTGRES_DB:-medusa}}
+  #   DATABASE_URL=postgres://user:pass@your-pg-host:5432/medusa                 (PG 已启用 SSL)
+  #   DATABASE_URL=postgres://user:pass@your-pg-host:5432/medusa?sslmode=disable (PG 未启用 SSL)
+  DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-medusa}:${POSTGRES_PASSWORD:-medusa}@db:5432/${POSTGRES_DB:-medusa}?sslmode=disable}
   # Redis 连接串：默认指向本文件的 redis 服务。
   # 使用外部 Redis 时在 .env 中设置，例如：
   #   REDIS_URL=redis://:password@your-redis-host:6379/0      (TLS: rediss://...)
@@ -40,7 +43,9 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-medusa} -d ${POSTGRES_DB:-medusa}"]
+      # -h 127.0.0.1 强制走 TCP，与 Medusa 的连接方式一致
+      # （默认 pg_isready 走 Unix socket，initdb 阶段会提前变绿）
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-medusa} -d ${POSTGRES_DB:-medusa}"]
       interval: 5s
       timeout: 5s
       retries: 10

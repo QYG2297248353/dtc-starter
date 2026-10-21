@@ -122,8 +122,15 @@ docker compose exec backend ./node_modules/.bin/medusa user -e admin@example.com
 ```dotenv
 # PostgreSQL（postgres:// 与 postgresql:// 均可）
 DATABASE_URL=postgres://用户名:密码@主机:5432/数据库名
-# 需要 SSL 的云数据库（RDS、Supabase 等）：
-DATABASE_URL=postgres://用户名:密码@主机:5432/medusa?sslmode=require
+
+# SSL 行为（重要）：
+# Medusa 对非 localhost 的主机【默认启用 SSL】（不校验证书，rejectUnauthorized=false）。
+#   - PG 已启用 SSL（云数据库 RDS/Supabase 等）：直接写连接串即可，无需参数
+#   - PG 未启用 SSL（自建/docker 默认镜像）：必须追加 ?sslmode=disable（无下划线）
+#     否则连接会在 SSL 握手阶段挂起，迁移报 "connection timed out after 10 seconds"
+#     注意：Medusa 文档中的 ?ssl_mode=disable（带下划线）会被框架提前剥离，
+#     在 2.22 版本下对迁移锁连接不生效，请使用 sslmode=disable。
+DATABASE_URL=postgres://user:pass@pg.example.com:5432/medusa?sslmode=disable
 
 # Redis
 REDIS_URL=redis://:密码@主机:6379/0
@@ -150,7 +157,7 @@ cp .env.example .env
 ```dotenv
 JWT_SECRET=填我
 COOKIE_SECRET=填我
-DATABASE_URL=postgres://user:pass@pg.example.com:5432/medusa?sslmode=require
+DATABASE_URL=postgres://user:pass@pg.example.com:5432/medusa?sslmode=disable
 REDIS_URL=redis://:pass@redis.example.com:6379/0
 ADMIN_CORS=https://api.example.com
 AUTH_CORS=https://api.example.com
