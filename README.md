@@ -63,9 +63,9 @@ The fastest way to get started is deploying with [Medusa Cloud](https://cloud.me
 
 ### Local Installation
 
-> **Prerequisites:
+> **Prerequisites:**
 >
-> - [Node.js](https://nodejs.org/) v20+
+> - [Node.js](https://nodejs.org/) v22.22+
 > - [PostgreSQL](https://www.postgresql.org/) v15+
 > - [pnpm](https://pnpm.io/) v10+
 
@@ -83,14 +83,14 @@ pnpm install
 cp apps/backend/.env.template apps/backend/.env
 ```
 
-3. Set the database URL in `apps/backend.env`:
+3. Set the database URL in `apps/backend/.env`:
 
 ```bash
 # Replace with actual database URL, make sure the database exists.
 DATABASE_URL=postgres://postgres:@localhost:5432/medusa-dtc-starter
 ```
 
-4. Run migrations:
+4. Run migrations (this also seeds initial store data):
 
 ```bash
 cd apps/backend
@@ -125,7 +125,7 @@ cp apps/storefront/.env.template apps/storefront/.env.local
 NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=pk_6c3...
 ```
 
-10.  Start storefront:
+10. Start the storefront:
 
 ```bash
 cd apps/storefront
@@ -134,10 +134,36 @@ pnpm dev
 
 The storefront runs on `http://localhost:8000`.
 
-You can slo run the following command from the root to start both backend and storefront:
+You can also start both the backend and storefront from the root:
 
 ```bash
 pnpm dev
+```
+
+## Project Structure
+
+```text
+apps/
+├── backend/      # Medusa application: API routes, workflows, modules, admin extensions
+└── storefront/   # Next.js storefront (optional)
+```
+
+## Building with AI Agents
+
+This repo is set up for AI coding agents such as Claude Code, Cursor, and Codex:
+
+- [`AGENTS.md`](./AGENTS.md) holds the project's commands, conventions, and off-limits paths. `CLAUDE.md` points to it.
+- Installed `@medusajs/*` packages ship their own `AGENTS.md` in `node_modules`, documenting the API of the exact version you have installed.
+- Install the [Medusa agent skills](https://docs.medusajs.com/learn/introduction/build-with-llms-ai/agentic-skills) and [MCP server](https://docs.medusajs.com/learn/introduction/build-with-llms-ai/mcp-server) for documentation-backed answers:
+
+```bash
+claude mcp add --transport http medusa https://docs.medusajs.com/mcp
+```
+
+- If you deploy on [Medusa Cloud](https://cloud.medusajs.com), add the Medusa Cloud MCP server so your agent can inspect deployments, build and runtime logs, environment variables, and your store's data. It authenticates with your Medusa Cloud account:
+
+```bash
+claude mcp add --transport http medusa-cloud https://cloud.medusajs.com/mcp
 ```
 
 ## Configuration
@@ -156,3 +182,5 @@ The storefront is configured via environment variables in `apps/storefront/.env.
 
 - [Medusa Documentation](https://docs.medusajs.com)
 - [Medusa Cloud](https://cloud.medusajs.com)
+- [Build with AI agents](https://docs.medusajs.com/learn/introduction/build-with-llms-ai)
+- [Medusa docs for LLMs (`llms.txt`)](https://docs.medusajs.com/llms.txt)
