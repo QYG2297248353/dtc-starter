@@ -1,0 +1,132 @@
+# Keep this fork in sync with the upstream starter:
+#   https://github.com/medusajs/dtc-starter
+#
+# Strategy:
+#   1. Fast-forward/merge upstream into the default branch and push.
+#   2. If the merge conflicts, push a sync branch and open a pull
+#      request so the conflict can be resolved manually.
+#
+# Required repository secret:
+#   GITHUBTOKEN   PAT with repo (contents:write, pull-requests:write)
+#                 so the sync can push and open PRs. Falls back to the
+#                 built-in GITHUB_TOKEN if GITHUBTOKEN is not set.
+#
+# Runs on a schedule and on manual dispatch.
+name: Sync Fork
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # daily at 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUBTOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/medusajs/dtc-starter.git || git remote set-url upstream https://github.com/medusajs/dtc-starter.git
+          git fetch upstream --tags
+
+      - name: Resolve branch names
+        id: branches
+        run: |
+          UPSTREAM_DEFAULT=$(git remote show upstream | sed -n 's/.*HEAD branch: //p')
+          LOCAL_DEFAULT=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
+          echo "upstream_default=${UPSTREAM_DEFAULT}" >> "$GITHUB_OUTPUT"
+          echo "local_default=${LOCAL_DEFAULT}" >> "$GITHUB_OUTPUT"
+          echo "Upstream default: ${UPSTREAM_DEFAULT}, local default: ${LOCAL_DEFAULT}"
+
+      - name: Check if already up to date
+        id: status
+        run: |
+          git fetch origin "${{ steps.branches.outputs.local_default }}"
+          LOCAL=$(git rev-parse origin/${{ steps.branches.outputs.local_default }})
+          REMOTE=$(git rev-parse upstream/${{ steps.branches.outputs.upstream_default }})
+          BASE=$(git merge-base origin/${{ steps.branches.outputs.local_default }} upstream/${{ steps.branches.outputs.upstream_default }})
+          if [ "$LOCAL" = "$REMOTE" ] || [ "$REMOTE" = "$BASE" ]; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge upstream
+        if: steps.status.outputs.up_to_date == 'false'
+        id: merge
+        run: |
+          git checkout -B "${{ steps.branches.outputs.local_default }}" "origin/${{ steps.branches.outputs.local_default }}"
+          if git merge --no-edit "upstream/${{ steps.branches.outputs.upstream_default }}"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push to default branch
+        if: steps.merge.outputs.merged == 'true'
+        run: git push origin "${{ steps.branches.outputs.local_default }}"
+
+      - name: Push sync branch on conflict
+        if: steps.merge.outputs.merged == 'false'
+        env:
+          SYNC_BRANCH: sync/upstream-${{ github.run_id }}
+        run: |
+          git checkout -B "$SYNC_BRANCH" "upstream/${{ steps.branches.outputs.upstream_default }}"
+          git push -f origin "$SYNC_BRANCH"
+          echo "SYNC_BRANCH=$SYNC_BRANCH" >> "$GITHUB_ENV"
+
+      - name: Open pull request on conflict
+        if: steps.merge.outputs.merged == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = process.env.SYNC_BRANCH;
+            const base = "${{ steps.branches.outputs.local_default }}";
+            const upstream = "${{ steps.branches.outputs.upstream_default }}";
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              head: `${context.repo.owner}:${branch}`,
+            });
+            if (prs.length > 0) {
+              core.info(`PR already exists: ${prs[0].html_url}`);
+              return;
+            }
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: "chore: sync with upstream medusajs/dtc-starter",
+              head: branch,
+              base,
+              body: [
+                "Automatic fork sync hit merge conflicts and needs manual resolution.",
+                "",
+                `Upstream: https://github.com/medusajs/dtc-starter (branch \`${upstream}\`)`,
+                "",
+                "Resolve locally:",
+                "```bash",
+                `git fetch origin ${branch}`,
+                `git checkout ${base}`,
+                `git merge ${branch}`,
+                "# fix conflicts, then:",
+                `git push origin ${base}`,
+                "```",
+              ].join("\n"),
+            });
+            core.info(`Opened PR: ${pr.html_url}`);

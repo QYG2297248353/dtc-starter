@@ -1,0 +1,93 @@
+# Example deployment for the Medusa backend (no storefront).
+#
+# Image: qyg2297248353/medusa (Docker Hub)
+#        ghcr.io/qyg2297248353/medusa (GHCR)
+# Override with: MEDUSA_IMAGE=ghcr.io/qyg2297248353/medusa:latest
+#
+# Quick start:
+#   cp .env.example .env   # or export the variables below
+#   docker compose up -d
+#
+# The `migrate` service runs database migrations (medusa db:migrate)
+# once before the backend starts. See docs/DEPLOYMENT.md for details.
+
+x-backend-env: &backend-env
+  NODE_ENV: production
+  # PostgreSQL 连接串：默认指向本文件的 db 服务。
+  # 使用外部数据库时，在 .env 中直接设置完整的 DATABASE_URL 即可覆盖，例如：
+  #   DATABASE_URL=postgres://user:pass@your-pg-host:5432/medusa?sslmode=require
+  DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-medusa}:${POSTGRES_PASSWORD:-medusa}@db:5432/${POSTGRES_DB:-medusa}}
+  # Redis 连接串：默认指向本文件的 redis 服务。
+  # 使用外部 Redis 时在 .env 中设置，例如：
+  #   REDIS_URL=redis://:password@your-redis-host:6379/0      (TLS: rediss://...)
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  # CORS — set these to your real origins in production
+  STORE_CORS: ${STORE_CORS:-http://localhost:8000}
+  ADMIN_CORS: ${ADMIN_CORS:-http://localhost:9000}
+  AUTH_CORS: ${AUTH_CORS:-http://localhost:9000}
+  # Secrets — MUST be provided (no defaults)
+  JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+  COOKIE_SECRET: ${COOKIE_SECRET:?COOKIE_SECRET is required}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-medusa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medusa}
+      POSTGRES_DB: ${POSTGRES_DB:-medusa}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-medusa} -d ${POSTGRES_DB:-medusa}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot migration job: runs `medusa db:migrate` (migrations +
+  # initial data seed) against the built server, then exits.
+  migrate:
+    image: ${MEDUSA_IMAGE:-qyg2297248353/medusa:latest}
+    command: ["./node_modules/.bin/medusa", "db:migrate"]
+    environment: *backend-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    image: ${MEDUSA_IMAGE:-qyg2297248353/medusa:latest}
+    restart: unless-stopped
+    environment: *backend-env
+    ports:
+      - "${PORT:-9000}:9000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  pgdata:
+  redisdata:

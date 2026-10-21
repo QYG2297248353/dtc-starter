@@ -1,0 +1,46 @@
+# Version control
+.git
+.gitignore
+.github
+
+# Dependencies (reinstalled inside the image)
+**/node_modules
+**/.pnpm-store
+
+# Build output (regenerated inside the image)
+**/.medusa
+**/dist
+**/build
+**/.next
+**/out
+**/.turbo
+**/tsconfig.tsbuildinfo
+
+# Storefront is not part of the backend image
+apps/storefront
+
+# Env / secrets — always passed at runtime
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Tests / docs / tooling
+**/coverage
+**/__tests__
+**/integration-tests
+**/*.spec.ts
+.vscode
+.idea
+
+# Docker / deploy artifacts
+Dockerfile
+.dockerignore
+docker-compose*.yml
+docs
+
+# Misc
+**/.DS_Store
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/*.pem
