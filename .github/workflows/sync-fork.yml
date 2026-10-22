@@ -47,7 +47,15 @@ jobs:
         id: branches
         run: |
           UPSTREAM_DEFAULT=$(git remote show upstream | sed -n 's/.*HEAD branch: //p')
-          LOCAL_DEFAULT=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
+          LOCAL_DEFAULT=$(git remote show origin | sed -n 's/.*HEAD branch: //p')
+          # Fall back to the checked-out branch if origin/HEAD is unavailable
+          if [ -z "$LOCAL_DEFAULT" ]; then
+            LOCAL_DEFAULT=$(git rev-parse --abbrev-ref HEAD)
+          fi
+          if [ -z "$UPSTREAM_DEFAULT" ] || [ -z "$LOCAL_DEFAULT" ]; then
+            echo "Failed to resolve default branches (upstream='${UPSTREAM_DEFAULT}', local='${LOCAL_DEFAULT}')" >&2
+            exit 1
+          fi
           echo "upstream_default=${UPSTREAM_DEFAULT}" >> "$GITHUB_OUTPUT"
           echo "local_default=${LOCAL_DEFAULT}" >> "$GITHUB_OUTPUT"
           echo "Upstream default: ${UPSTREAM_DEFAULT}, local default: ${LOCAL_DEFAULT}"

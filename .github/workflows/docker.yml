@@ -7,12 +7,12 @@
 #   DOCKERHUB_TOKEN     Docker Hub access token
 #   GITHUBTOKEN         PAT with write:packages (used for ghcr.io login)
 #
-# Triggers: push to main/master, tags v*, or manual dispatch.
+# Triggers: push to release, tags v*, or manual dispatch.
 name: Docker
 
 on:
   push:
-    branches: [main, master]
+    branches: [release]
     tags: ["v*"]
   workflow_dispatch:
 
