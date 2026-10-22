@@ -62,9 +62,8 @@ async function getRegionMap(cacheId: string) {
 }
 
 /**
- * Fetches regions from Medusa and sets the region cookie.
- * @param request
- * @param response
+ * Resolves the country code from the URL, falling back to the store default.
+ * Not IP-based, so crawlers and AI agents get a stable redirect.
  */
 async function getCountryCode(
   request: NextRequest,
@@ -74,20 +73,8 @@ async function getCountryCode(
 
   const urlCountryCode = request.nextUrl.pathname.split("/")[1]?.toLowerCase()
 
-  // Cloudflare Workers provides country via request.cf.country
-  const cloudflareCountryCode = (request as { cf?: { country?: string } }).cf?.country?.toLowerCase()
-
-  // Vercel provides x-vercel-ip-country header
-  const vercelCountryCode = request.headers
-    .get("x-vercel-ip-country")
-    ?.toLowerCase()
-
   if (urlCountryCode && regionMap.has(urlCountryCode)) {
     countryCode = urlCountryCode
-  } else if (cloudflareCountryCode && regionMap.has(cloudflareCountryCode)) {
-    countryCode = cloudflareCountryCode
-  } else if (vercelCountryCode && regionMap.has(vercelCountryCode)) {
-    countryCode = vercelCountryCode
   } else if (regionMap.has(DEFAULT_REGION)) {
     countryCode = DEFAULT_REGION
   } else if (regionMap.keys().next().value) {
@@ -116,15 +103,18 @@ export async function middleware(request: NextRequest) {
   const firstPathSegment = request.nextUrl.pathname.split("/")[1]?.toLowerCase()
   const urlHasCountry = firstPathSegment === country.toLowerCase()
 
-  if (urlHasCountry) {
+  // Serve the default region at "/" instead of redirecting, so agents and
+  // crawlers get the storefront content directly from the root URL.
+  if (urlHasCountry || request.nextUrl.pathname === "/") {
+    const response = urlHasCountry
+      ? NextResponse.next()
+      : NextResponse.rewrite(new URL(`/${country}`, request.url))
     if (!cacheIdCookie) {
-      const response = NextResponse.next()
       response.cookies.set("_medusa_cache_id", cacheId, {
         maxAge: 60 * 60 * 24,
       })
-      return response
     }
-    return NextResponse.next()
+    return response
   }
 
   // if the url doesn't have the country, redirect to it
@@ -138,6 +128,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|images|assets|png|svg|jpg|jpeg|gif|webp).*)",
+    "/((?!api|ucp|buy|_next/static|_next/image|favicon.ico|images|assets|png|svg|jpg|jpeg|gif|webp).*)",
   ],
 }
