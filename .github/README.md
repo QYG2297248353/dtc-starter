@@ -1,55 +1,67 @@
-# .github — CI/CD & 部署速览
+# Medusa DTC Starter — 后端 Docker 部署
 
-本仓库 fork 自 `medusajs/dtc-starter`。fork 的唯一目标是：**让 Medusa 后端可以用 Docker Compose 一键部署**（内置或外部 PostgreSQL + Redis），并通过 GitHub Actions 自动构建多架构镜像推送到 Docker Hub 和 GHCR。
-
-fork 新增的所有文件都放在仓库根目录（不改动上游源码），以便 `sync-fork.yml` 每日自动合并上游时最小化冲突。唯一涉及上游源文件的改动是 `apps/backend/medusa-config.ts` 中的 Session Cookie 安全配置（见下文"Cookie 安全修复"）。
+本 fork 让 [medusajs/dtc-starter](https://github.com/medusajs/dtc-starter) 的 **Medusa 后端**可以通过 Docker Compose 一键部署到任何 Linux 主机。内置 PostgreSQL 16 + Redis 7，也可以接外部云数据库。
 
 ---
 
-## 一、fork vs 上游：改了什么
+## 项目结构
 
-| 上游保持不变 | fork 新增 / 修改 |
-| --- | --- |
-| `apps/backend/*`（除了 medusa-config.ts） | `Dockerfile` — 多阶段构建，基于 `node:22-alpine`，仅包含 backend 编译产物 |
-| `apps/storefront/*`（不参与 Docker 构建） | `.dockerignore` — 排除无关文件，加快构建 |
-| 所有上游 workflow | `docker-compose.yml` — 内置 PG 16 + Redis 7 容器，开箱即用 |
-| | `docker-compose.external.yml` — 使用外部 PG / Redis |
-| | `.env.example` — 部署环境变量模板 |
-| | `docs/DEPLOYMENT.md` — 完整部署文档 |
-| | `apps/backend/medusa-config.ts` — 加了 `cookieOptions`（env 驱动，见下） |
+```
+.
+├── apps/backend/          # Medusa 后端（API + Admin 后台）
+│   └── medusa-config.ts   # fork 加了 cookieOptions（env 驱动）
+├── apps/storefront/       # Next.js 前端（可选，不参与 Docker 构建）
+├── Dockerfile             # 多阶段构建，node:22-alpine，仅 backend
+├── docker-compose.yml     # 内置 PG + Redis，开箱即用
+├── docker-compose.external.yml   # 外部 PG + Redis
+├── .env.example           # 部署环境变量模板
+└── docs/DEPLOYMENT.md     # 完整部署文档
+```
 
-所有 fork 新增文件均带注释标识，便于后续合并上游时识别。
+fork 新增的所有文件都放在仓库根目录，不改上游源码（`medusa-config.ts` 里的 Cookie 配置例外，已用 `// fork-addition:` 注释标记）。上游每日自动同步，冲突时会自动开 PR 处理。
 
 ---
 
-## 二、快速部署（3 步）
+## 3 步部署
 
 ```bash
-# 1. 准备部署文件（任选其一）
+# 1. 准备文件
+mkdir medusa && cd medusa
 curl -O https://raw.githubusercontent.com/QYG2297248353/dtc-starter/main/docker-compose.yml
 curl -O https://raw.githubusercontent.com/QYG2297248353/dtc-starter/main/.env.example
 cp .env.example .env
 
-# 2. 编辑 .env —— 必填项：JWT_SECRET、COOKIE_SECRET；其余按实际访问域名调整
-#    HTTP 测试部署：COOKIE_SECURE=false  COOKIE_SAME_SITE=lax
-#    HTTPS 正式部署：COOKIE_SECURE=true  COOKIE_SAME_SITE=lax
+# 2. 编辑 .env（必填：JWT_SECRET、COOKIE_SECRET；按实际访问域名改 CORS）
 
 # 3. 启动
 docker compose pull
 docker compose up -d
 ```
 
-Admin 后台在 `http://<服务器IP>:9000/app`，首次使用前需要创建管理员：
+Admin 后台：`http://<服务器IP>:9000/app`
+
+创建管理员账号：
 
 ```bash
 docker compose exec backend ./node_modules/.bin/medusa user -e admin@example.com -p your-password
 ```
 
-完整部署步骤、外部数据库配置、升级回滚、运维命令等见 [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md)。
+---
+
+## 外部数据库
+
+使用外部 PostgreSQL / Redis（云 RDS、Supabase、ElastiCache 等）时，用另一个 compose 文件：
+
+```bash
+docker compose -f docker-compose.external.yml pull
+docker compose -f docker-compose.external.yml up -d
+```
+
+`.env` 里填 `DATABASE_URL` 和 `REDIS_URL` 即可。**外部数据库必须提前建好**——Medusa 只迁移表结构，不创建数据库本身。
 
 ---
 
-## 三、环境变量速查
+## 环境变量速查
 
 | 变量 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- |
@@ -65,82 +77,37 @@ docker compose exec backend ./node_modules/.bin/medusa user -e admin@example.com
 | `MEDUSA_IMAGE` | 否 | `qyg2297248353/medusa:latest` | 使用的镜像 |
 | `PORT` | 否 | `9000` | 宿主机映射端口 |
 
-> HTTPS 正式部署必须把 `COOKIE_SECURE` 设为 `true`，否则浏览器会拒绝写入带 `Secure` 标记的 Cookie（反向代理 TLS 终止场景）。纯 HTTP 测试部署保持默认 `false` 即可。
+---
+
+## Cookie 安全配置
+
+Medusa 生产模式（`NODE_ENV=production`）默认给 Session Cookie 加 `Secure` + `SameSite=None`。浏览器在纯 HTTP 下会**静默拒绝写入 Secure Cookie**，表现为登录接口返回 200 但始终跳回登录页。
+
+`.env` 里按你的部署场景选：
+
+| 场景 | `COOKIE_SECURE` | `COOKIE_SAME_SITE` |
+| --- | --- | --- |
+| HTTP 测试（`http://服务器IP:9000`） | `false` | `lax` |
+| HTTPS 正式（反向代理 TLS 终止） | `true` | `lax` |
+
+改完 `.env` 执行 `docker compose up -d` 让配置生效。
 
 ---
 
-## 四、Session Cookie 安全修复
+## 常见问题
 
-Medusa 生产模式（`NODE_ENV=production`）默认给 Session Cookie 加 `Secure` + `SameSite=None` 标记。**浏览器在纯 HTTP 场景下会静默拒绝写入 Secure Cookie**，表现为登录接口返回 `200` 但后续所有请求不带会话 Cookie，页面不断跳回登录页。
+**登录接口返回成功但始终跳回登录页？** → 检查 `COOKIE_SECURE` 是否与你的访问协议匹配。HTTP 部署设 `false`，HTTPS 设 `true`。
 
-fork 在 `apps/backend/medusa-config.ts` 中增加了 env 驱动的 `cookieOptions`：
+**`migrate` 服务失败、backend 不启动？** → 先跑 `docker compose logs migrate`。最常见原因：外部数据库不存在（需要先 `CREATE DATABASE medusa;`），或者 `DATABASE_URL` 没加 `?sslmode=disable`（自建 PG 默认不启 SSL）。
 
-```ts
-const cookieSecure = process.env.COOKIE_SECURE === "true"
-const cookieSameSite = (process.env.COOKIE_SAME_SITE || "lax") as "lax" | "strict" | "none"
+**登录失败 / 跨域报错？** → 确认实际访问 Admin 的地址（含协议和端口）已包含在 `ADMIN_CORS` 和 `AUTH_CORS` 中。
 
-// 在 projectConfig 顶层（与 databaseUrl、http 同级）
-cookieOptions: {
-  secure: cookieSecure,
-  sameSite: cookieSameSite,
-},
-```
-
-位置：`projectConfig.cookieOptions`，完全符合 [Medusa 官方配置文档](https://docs.medusajs.com/resources/references/medusa-config#cookieoptions)。
+**升级怎么做？** → `docker compose pull && docker compose up -d`，`migrate` 会自动执行新的数据库迁移。
 
 ---
 
-## 五、GitHub Actions 工作流
+镜像仓库：
+- Docker Hub: [`qyg2297248353/medusa`](https://hub.docker.com/r/qyg2297248353/medusa)
+- GHCR: `ghcr.io/qyg2297248353/medusa`
 
-### `docker.yml` — 构建并推送 Docker 镜像
-
-| 项目 | 内容 |
-| --- | --- |
-| **触发条件** | 推送到 `release` 分支、打 `v*` 标签（如 `v1.0.0`）、手动触发 |
-| **构建内容** | 多架构（`linux/amd64` + `linux/arm64`），基于 `node:22-alpine`，仅包含 backend 编译产物 |
-| **推送目标** | Docker Hub: `qyg2297248353/medusa` · GHCR: `ghcr.io/qyg2297248353/medusa` |
-| **标签** | `latest`（release 分支推送）、`sha-xxxxxxx`、语义化版本标签（tag 触发时） |
-| **所需 Secrets** | `DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`、`GITHUBTOKEN`（需 `write:packages` 权限） |
-
-> **注意**：当前工作流配置为触发 `release` 分支，不是 `main`。仓库默认分支是 `main`。推送 `main` 上的提交（如 cookie 修复）后不会自动构建镜像。需要发布镜像时，要么推送到 `release` 分支，要么打 `v*` 标签，要么手动触发 workflow。
-
-### `sync-fork.yml` — 每日同步上游
-
-| 项目 | 内容 |
-| --- | --- |
-| **触发条件** | 每日 UTC 03:17 定时、手动触发 |
-| **做什么** | fetch `medusajs/dtc-starter` → 尝试 fast-forward/merge 到默认分支 → 自动推送 |
-| **冲突处理** | 合并失败时推送 `sync/upstream-<run_id>` 分支并自动开 PR，标注冲突需要人工解决 |
-| **所需 Secrets** | `GITHUBTOKEN`（需 `contents:write` + `pull-requests:write` 权限）。未设置时回退使用内置 `GITHUB_TOKEN` |
-
-### `update.yaml` — Medusa 版本升级
-
-上游附带的 workflow，通过 `medusajs/medusa-update-action` 自动升级 Medusa 版本并开 PR。需要配置 `ANTHROPIC_API_KEY` secret 才能使用；fork 中未配置。
-
----
-
-## 六、镜像仓库
-
-| 仓库 | 地址 |
-| --- | --- |
-| Docker Hub | [qyg2297248353/medusa](https://hub.docker.com/r/qyg2297248353/medusa) |
-| GHCR | `ghcr.io/qyg2297248353/medusa` |
-
-部署机上拉取：
-
-```bash
-docker pull qyg2297248353/medusa:latest
-# 或
-docker pull ghcr.io/qyg2297248353/medusa:latest
-```
-
-切换镜像仓库：在 `.env` 中设置 `MEDUSA_IMAGE=ghcr.io/qyg2297248353/medusa:latest`。
-
----
-
-## 七、维护约定
-
-- **优先改 fork 新增文件，不改上游源码**（除非像 Cookie 配置那样确实需要在 `medusa-config.ts` 中加代码）
-- 修改上游源码时，务必用 `// fork-addition:` 注释标记，便于后续 sync-fork 时识别和手动解决冲突
-- 不要改 `sync-fork.yml`、`update.yaml` 的同步/升级逻辑
-- 发布新镜像：创建 `release` 分支（让 sync-fork 自动从 main 合并过去）或打 `v*` 标签，`docker.yml` 会自动构建推送
+详细部署步骤、连接串格式、运维命令、回滚方案等见 [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md)。
