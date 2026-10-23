@@ -88,6 +88,11 @@ POSTGRES_DB=medusa
 STORE_CORS=https://shop.example.com
 ADMIN_CORS=https://api.example.com
 AUTH_CORS=https://api.example.com
+
+# Cookie 安全：HTTPS 正式部署必须显式开启 Secure
+# （docker-compose 默认 COOKIE_SECURE=false 仅适配 HTTP 测试）
+COOKIE_SECURE=true
+COOKIE_SAME_SITE=lax
 ```
 
 ### 3. 启动
@@ -162,6 +167,10 @@ REDIS_URL=redis://:pass@redis.example.com:6379/0
 ADMIN_CORS=https://api.example.com
 AUTH_CORS=https://api.example.com
 STORE_CORS=https://shop.example.com
+
+# Cookie 安全：HTTPS 正式部署必须显式开启 Secure
+COOKIE_SECURE=true
+COOKIE_SAME_SITE=lax
 ```
 
 启动（步骤与场景 A 相同，只是多一个 `-f`）：
