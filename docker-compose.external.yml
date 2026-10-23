@@ -28,6 +28,12 @@ x-backend-env: &backend-env
   STORE_CORS: ${STORE_CORS:-http://localhost:8000}
   ADMIN_CORS: ${ADMIN_CORS:-http://localhost:9000}
   AUTH_CORS: ${AUTH_CORS:-http://localhost:9000}
+  # Session cookie — Medusa production defaults to Secure+SameSite=None,
+  # which breaks plain HTTP deployments. Override via .env:
+  #   COOKIE_SECURE=true  COOKIE_SAME_SITE=lax   (HTTPS / reverse-proxy TLS)
+  #   COOKIE_SECURE=false COOKIE_SAME_SITE=lax  (plain HTTP test deploy)
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
   # Secrets — MUST be provided (no defaults)
   JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
   COOKIE_SECRET: ${COOKIE_SECRET:?COOKIE_SECRET is required}

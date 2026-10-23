@@ -201,6 +201,8 @@ REDIS_URL=redis://:pass@redis.example.com:6379/0
 | `STORE_CORS` | Store API 允许来源，逗号分隔 | 否 | `http://localhost:8000` |
 | `ADMIN_CORS` | Admin 允许来源 | 否 | `http://localhost:9000` |
 | `AUTH_CORS` | 认证端点允许来源 | 否 | `http://localhost:9000` |
+| `COOKIE_SECURE` | Session Cookie 是否仅 HTTPS 发送。HTTPS 正式部署设 `true`，HTTP 测试部署设 `false` | 否 | `false` |
+| `COOKIE_SAME_SITE` | Session Cookie 的 SameSite 属性（`lax`/`strict`/`none`） | 否 | `lax` |
 | `MEDUSA_IMAGE` | 使用的镜像 | 否 | `qyg2297248353/medusa:latest` |
 | `PORT` | 宿主机映射端口 | 否 | `9000` |
 
@@ -249,6 +251,15 @@ docker compose down -v
 
 **Q: Admin 后台登录失败 / 跨域报错？**
 确认访问 Admin 的地址已包含在 `ADMIN_CORS` 与 `AUTH_CORS` 中（含协议与端口），改完 `.env` 后执行 `docker compose up -d` 使配置生效。
+
+**Q: 登录接口返回成功但始终跳回登录页？**
+这是 **Session Cookie 未写入** 的典型症状。Medusa 生产模式（`NODE_ENV=production`）默认给 Cookie 加 `Secure` 标记，浏览器在 `http://IP:9000/app` 这种纯 HTTP 场景下会**静默拒绝写入 Secure Cookie**，表现为登录 `/auth/user` 返回 `200` 但后续请求不带会话 Cookie。
+
+检查 `.env` 中的 `COOKIE_SECURE`：
+- **HTTP 测试部署**（直接通过 `http://服务器IP:9000` 访问）：设 `COOKIE_SECURE=false`
+- **HTTPS 正式部署**（Nginx/Cloudflare 等反向代理已 TLS 终止）：设 `COOKIE_SECURE=true`
+
+改完后执行 `docker compose up -d` 重启后端，再用无痕窗口重新登录验证。
 
 **Q: GHCR 推送报权限错误？**
 确认 `GITHUBTOKEN`（PAT）勾选了 `write:packages` 与 `read:packages`；首次推送后到 GHCR 包页面按需设置可见性。私有镜像部署时需先 `docker login ghcr.io`。
