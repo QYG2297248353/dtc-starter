@@ -29,6 +29,8 @@ module.exports = defineConfig({
       cookieSecret: process.env.COOKIE_SECRET,
     }
   },
+  // fork-addition: file module — pin the local provider's public URL so
+  // uploaded files get absolute URLs on the real deployment domain.
   modules: [
     {
       resolve: "@medusajs/medusa/file",

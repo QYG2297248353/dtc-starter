@@ -9,7 +9,7 @@
 ```
 .
 ├── apps/backend/          # Medusa 后端（API + Admin 后台）
-│   └── medusa-config.ts   # fork 加了 cookieOptions（env 驱动）
+│   └── medusa-config.ts   # fork 追加了 cookieOptions 与文件模块 backend_url（均 env 驱动）
 ├── apps/storefront/       # Next.js 前端（可选，不参与 Docker 构建）
 ├── Dockerfile             # 多阶段构建，node:22-alpine，仅 backend
 ├── docker-compose.yml     # 内置 PG + Redis，开箱即用
@@ -18,7 +18,7 @@
 └── docs/DEPLOYMENT.md     # 完整部署文档
 ```
 
-fork 新增的所有文件都放在仓库根目录，不改上游源码（`medusa-config.ts` 里的 Cookie 配置例外，已用 `// fork-addition:` 注释标记）。上游每日自动同步，冲突时会自动开 PR 处理。
+fork 新增的所有文件都放在仓库根目录，不改上游源码。仅有的例外（用 `// fork-addition:` 注释标记）：`medusa-config.ts` 里的 Cookie 配置与本地文件模块的 `backend_url`——后者没有环境变量兜底，不配会把上传图片的 URL 写成 `localhost:9000`。上游每日自动同步，冲突时会自动开 PR 处理。
 
 ---
 
@@ -31,7 +31,7 @@ curl -O https://raw.githubusercontent.com/QYG2297248353/dtc-starter/main/docker-
 curl -O https://raw.githubusercontent.com/QYG2297248353/dtc-starter/main/.env.example
 cp .env.example .env
 
-# 2. 编辑 .env（必填：JWT_SECRET、COOKIE_SECRET；按实际访问域名改 CORS）
+# 2. 编辑 .env（必填：JWT_SECRET、COOKIE_SECRET；按实际访问地址改 CORS 与 BACKEND_URL）
 
 # 3. 启动
 docker compose pull
@@ -61,6 +61,15 @@ docker compose -f docker-compose.external.yml up -d
 
 ---
 
+## 上传文件（商品图片）
+
+后端用 Medusa 默认的本地文件模块，上传的文件存放在容器内 `/server/static`。compose 已为该目录挂载命名卷 `medusa_static`，容器重建不会丢图；`docker compose down -v` 会连图片一起删除。
+
+- 仅适用**单实例**部署；多副本/多机需改用 S3（本地文件模块官方定位为开发用途）。
+- 图片地址由 `BACKEND_URL` 决定，**部署到非 localhost 地址时必须设置**，否则会写成 `http://localhost:9000/static/...`。
+
+---
+
 ## 环境变量速查
 
 | 变量 | 必填 | 默认 | 说明 |
@@ -72,6 +81,7 @@ docker compose -f docker-compose.external.yml up -d
 | `ADMIN_CORS` | 否 | `http://localhost:9000` | Admin 允许来源 |
 | `AUTH_CORS` | 否 | `http://localhost:9000` | 认证端点允许来源 |
 | `STORE_CORS` | 否 | `http://localhost:8000` | Store API 允许来源 |
+| `BACKEND_URL` | 非 localhost 部署时必填 | `http://localhost:9000` | 后端公网地址：含协议/主机/端口、无尾斜杠。决定上传图片等文件的绝对 URL |
 | `COOKIE_SECURE` | 否 | `false` | Session Cookie 是否仅 HTTPS 发送 |
 | `COOKIE_SAME_SITE` | 否 | `lax` | Session Cookie 的 SameSite 属性 |
 | `MEDUSA_IMAGE` | 否 | `qyg2297248353/medusa:latest` | 使用的镜像 |
@@ -102,7 +112,9 @@ Medusa 生产模式（`NODE_ENV=production`）默认给 Session Cookie 加 `Secu
 
 **登录失败 / 跨域报错？** → 确认实际访问 Admin 的地址（含协议和端口）已包含在 `ADMIN_CORS` 和 `AUTH_CORS` 中。
 
-**升级怎么做？** → `docker compose pull && docker compose up -d`，`migrate` 会自动执行新的数据库迁移。
+**上传的图片保存后不显示、地址是 `localhost:9000`？** → 设置 `BACKEND_URL` 为实际访问地址后重启，新上传的图片即正常；存量数据需按 [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md) 里的 SQL 批量替换地址前缀。
+
+**升级怎么做？** → `docker compose pull && docker compose up -d`，`migrate` 会自动执行新的数据库迁移。图片卷 `medusa_static` 不受影响；若从**没有挂载该卷的旧版本**升级，先 `docker compose cp backend:/server/static ./static-backup` 备份，升级后再回灌（步骤见部署文档）。
 
 ---
 
