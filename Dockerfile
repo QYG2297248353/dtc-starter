@@ -56,8 +56,13 @@ COPY --from=builder --chown=medusa:medusa /app/apps/backend/.medusa/server ./
 #                                 (@medusajs/telemetry, esbuild, ...)
 #   --config.auto-install-peers   match the repo's .npmrc behavior for
 #                                 @medusajs/draft-order's peer on @medusajs/ui
+# /server/static is where the local file module writes uploaded files at
+# runtime (upload_dir defaults to process.cwd()/static). Create it here so
+# (a) it exists and (b) a volume mounted on it inherits the medusa uid/gid —
+# otherwise Docker creates a root-owned volume and uploads fail with EACCES.
 RUN pnpm install --prod --ignore-scripts --config.auto-install-peers=true \
     && pnpm store prune \
+    && mkdir -p /server/static \
     && chown -R medusa:medusa /server
 
 USER medusa

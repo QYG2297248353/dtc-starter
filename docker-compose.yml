@@ -91,6 +91,12 @@ services:
     environment: *backend-env
     ports:
       - "${PORT:-9000}:9000"
+    # Uploaded files (product images) live in /server/static. Without this
+    # volume they are lost every time the container is recreated.
+    # Single-instance only: the local file provider cannot share storage
+    # across replicas — use S3 for multi-replica / production setups.
+    volumes:
+      - medusa_static:/server/static
     depends_on:
       db:
         condition: service_healthy
@@ -108,3 +114,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  medusa_static:

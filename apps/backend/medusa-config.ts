@@ -9,6 +9,9 @@ loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 const cookieSecure = process.env.COOKIE_SECURE === "true"
 const cookieSameSite = (process.env.COOKIE_SAME_SITE || "lax") as "lax" | "strict" | "none"
 
+// Trailing slashes are stripped so BACKEND_URL=.../ and ...://host both work.
+const backendUrl = (process.env.BACKEND_URL || "http://localhost:9000").replace(/\/+$/, "")
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -35,10 +38,10 @@ module.exports = defineConfig({
             resolve: "@medusajs/medusa/file-local",
             id: "local",
             options: {
-              // The public base URL used to build absolute file URLs
-              // (e.g. product images). Defaults to localhost:9000 which
-              // breaks any non-local deployment, so drive it from env.
-              backend_url: `${process.env.BACKEND_URL || "http://localhost:9000"}/static`,
+              // Public base URL used to build absolute file URLs (product
+              // images). The provider has no env fallback in 2.22 — without
+              // this option every upload is stored with localhost:9000.
+              backend_url: `${backendUrl}/static`,
             },
           },
         ],

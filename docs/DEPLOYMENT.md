@@ -2,7 +2,9 @@
 
 本文档介绍如何通过 GitHub Actions 构建 Docker 镜像，并用 Docker Compose 部署 **Medusa 后端**（不含 storefront 前端）。PostgreSQL 与 Redis 既可以用 compose 内置的容器，也可以用外部服务——全部通过环境变量配置，无需改代码。
 
-> 本仓库 fork 自 [medusajs/dtc-starter](https://github.com/medusajs/dtc-starter)。为便于后续升级，部署相关文件（`Dockerfile`、`.dockerignore`、`docker-compose.yml`、`docker-compose.external.yml`、`.env.example`、`.github/workflows/docker.yml`、`.github/workflows/sync-fork.yml`）均为**纯新增**，未改动任何上游代码。
+> 本仓库 fork 自 [medusajs/dtc-starter](https://github.com/medusajs/dtc-starter)。为便于后续升级，部署相关文件（`Dockerfile`、`.dockerignore`、`docker-compose.yml`、`docker-compose.external.yml`、`.env.example`、`.github/workflows/docker.yml`、`.github/workflows/sync-fork.yml`）均为**纯新增**。
+>
+> 唯一改动的上游文件是 [apps/backend/medusa-config.ts](../apps/backend/medusa-config.ts)，且只做**追加式**修改（`fork-addition` 注释标记）：`cookieOptions` 与文件模块的 `backend_url`。这两项在上游配置里没有任何环境变量兜底（`@medusajs/file-local` 的 `backend_url` 只读 options），不改就无法部署到非 `localhost:9000` 的地址。上游该文件仅 15 行且极少变动，冲突面很小；冲突时保留 fork 的追加段即可。
 
 ## 架构概览
 
@@ -43,12 +45,13 @@
 | `DOCKERHUB_TOKEN` | Docker Hub Access Token（Account Settings → Security 生成） |
 | `GITHUBTOKEN` | GitHub PAT，需 `write:packages`（推送 GHCR）及 `repo` 权限（sync-fork 推送/开 PR）。若未设置，sync-fork 回退使用内置 `GITHUB_TOKEN` |
 
-工作流 [docker.yml](../.github/workflows/docker.yml) 在推送到 `main`/`master`、推送 `v*` 标签或手动触发时构建并推送镜像：
+工作流 [docker.yml](../.github/workflows/docker.yml) 在推送到 `release` 分支、推送 `v*` 标签或手动触发时构建并推送镜像：
 
 | 触发 | 标签示例 |
 | --- | --- |
-| 推送到默认分支 | `latest`, `main`, `sha-xxxxxxx` |
+| 推送到 `release` 分支 | `release`, `sha-xxxxxxx` |
 | 推送标签 `v1.2.0` | `1.2.0`, `1.2`, `v1.2.0` |
+| 推送到默认分支（且该分支为默认分支时） | `latest` |
 
 ## 二、部署前置条件
 
@@ -217,7 +220,7 @@ REDIS_URL=redis://:pass@redis.example.com:6379/0
 | `STORE_CORS` | Store API 允许来源，逗号分隔 | 否 | `http://localhost:8000` |
 | `ADMIN_CORS` | Admin 允许来源 | 否 | `http://localhost:9000` |
 | `AUTH_CORS` | 认证端点允许来源 | 否 | `http://localhost:9000` |
-| `BACKEND_URL` | 后端公网地址（无尾斜杠）。本地文件模块据此拼接上传文件（商品图片等）的绝对 URL，必须与用户实际访问地址一致 | 否 | `http://localhost:9000` |
+| `BACKEND_URL` | 后端公网地址：含协议/主机/端口、无尾斜杠。本地文件模块据此拼接上传文件（商品图片等）的绝对 URL，必须与用户实际访问地址一致 | 否 | `http://localhost:9000` |
 | `COOKIE_SECURE` | Session Cookie 是否仅 HTTPS 发送。HTTPS 正式部署设 `true`，HTTP 测试部署设 `false` | 否 | `false` |
 | `COOKIE_SAME_SITE` | Session Cookie 的 SameSite 属性（`lax`/`strict`/`none`） | 否 | `lax` |
 | `MEDUSA_IMAGE` | 使用的镜像 | 否 | `qyg2297248353/medusa:latest` |
@@ -254,9 +257,28 @@ docker compose exec backend sh
 # 备份内置数据库
 docker compose exec db pg_dump -U medusa medusa > backup-$(date +%F).sql
 
+# 备份已上传文件（产品图片等）
+docker compose cp backend:/server/static ./static-backup
+
 # 完全重置（危险：删除内置 PG/Redis 数据卷）
 docker compose down -v
 ```
+
+### 上传文件的存储
+
+后端使用 Medusa 默认的**本地文件模块**，上传文件写入容器内 `/server/static`，并由后端在 `/static` 路径对外提供访问。compose 已为该目录挂载命名卷 `medusa_static`，容器重建不会丢图：
+
+- 单实例部署可用；**多副本/多机部署不可用**（各容器本地磁盘不共享），生产建议改用 S3。
+- 官方明确本地文件模块仅面向开发环境，生产环境的持久化与备份需自行保障。
+- 升级时不要 `docker compose down -v`，否则会一并删除图片卷。
+
+> **从"无卷"旧部署迁移到本版本时**：旧容器的上传文件在容器可写层里，`up -d` 重建容器会丢失。务必先备份再升级：
+>
+> ```bash
+> docker compose cp backend:/server/static ./static-backup   # 1. 先导出
+> docker compose up -d                                        # 2. 重建（此时才创建卷）
+> docker compose cp ./static-backup/. backend:/server/static  # 3. 回灌到卷
+> ```
 
 ## 八、常见问题
 
@@ -270,7 +292,25 @@ docker compose down -v
 确认访问 Admin 的地址已包含在 `ADMIN_CORS` 与 `AUTH_CORS` 中（含协议与端口），改完 `.env` 后执行 `docker compose up -d` 使配置生效。
 
 **Q: 上传的商品图片保存后显示为 `localhost:9000` 地址、无法加载？**
-这是因为后端公网地址 `BACKEND_URL` 未配置，Medusa 本地文件模块默认用 `http://localhost:9000/static` 拼接图片的绝对 URL 并写入数据库。解决方法：在 `.env` 中设置 `BACKEND_URL` 为用户实际访问后端的地址（含协议、主机、端口，无尾斜杠），例如 `BACKEND_URL=https://api.example.com`，然后 `docker compose up -d` 重启。注意：此前已上传、URL 已固化为 `localhost:9000` 的图片需要重新上传（或在数据库中批量替换 `file` 表的 `url` 字段）才能生效。生产环境建议改用 S3 等对象存储，而非本地文件模块。
+这是因为后端公网地址 `BACKEND_URL` 未配置，Medusa 本地文件模块默认用 `http://localhost:9000/static` 拼接图片的绝对 URL 并写入数据库。
+
+1. 在 `.env` 中设置 `BACKEND_URL` 为实际访问后端的地址：必须带协议（`http`/`https`）、主机、端口，无尾斜杠，例如 `BACKEND_URL=https://api.example.com`。注意端口：若改了 `PORT`，这里也要写 `:端口`。
+2. `docker compose up -d` 重启，**新上传**的图片即使用正确地址。
+3. 存量数据需要一次性修正（先备份）：
+
+```bash
+docker compose exec -T db psql -U medusa -d medusa <<'SQL'
+UPDATE product_image
+SET url = replace(url, 'http://localhost:9000/static', 'https://api.example.com/static')
+WHERE url LIKE 'http://localhost:9000/static/%';
+
+UPDATE file
+SET url = replace(url, 'http://localhost:9000/static', 'https://api.example.com/static')
+WHERE url LIKE 'http://localhost:9000/static/%';
+SQL
+```
+
+把上面的 `https://api.example.com` 换成你的 `BACKEND_URL`。图片文件本身仍在 `/server/static`（见"上传文件的存储"），只是库里记录的地址前缀需要改。生产环境建议改用 S3 等对象存储，而非本地文件模块。
 
 **Q: 登录接口返回成功但始终跳回登录页？**
 这是 **Session Cookie 未写入** 的典型症状。Medusa 生产模式（`NODE_ENV=production`）默认给 Cookie 加 `Secure` 标记，浏览器在 `http://IP:9000/app` 这种纯 HTTP 场景下会**静默拒绝写入 Secure Cookie**，表现为登录 `/auth/user` 返回 `200` 但后续请求不带会话 Cookie。
