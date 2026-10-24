@@ -25,5 +25,24 @@ module.exports = defineConfig({
       jwtSecret: process.env.JWT_SECRET,
       cookieSecret: process.env.COOKIE_SECRET,
     }
-  }
+  },
+  modules: [
+    {
+      resolve: "@medusajs/medusa/file",
+      options: {
+        providers: [
+          {
+            resolve: "@medusajs/medusa/file-local",
+            id: "local",
+            options: {
+              // The public base URL used to build absolute file URLs
+              // (e.g. product images). Defaults to localhost:9000 which
+              // breaks any non-local deployment, so drive it from env.
+              backend_url: `${process.env.BACKEND_URL || "http://localhost:9000"}/static`,
+            },
+          },
+        ],
+      },
+    },
+  ]
 })

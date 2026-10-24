@@ -28,6 +28,12 @@ x-backend-env: &backend-env
   STORE_CORS: ${STORE_CORS:-http://localhost:8000}
   ADMIN_CORS: ${ADMIN_CORS:-http://localhost:9000}
   AUTH_CORS: ${AUTH_CORS:-http://localhost:9000}
+  # Public base URL of the backend. The local file module builds absolute
+  # file URLs (product images...) from this. Must match the URL users
+  # actually use to reach the backend (scheme + host + port).
+  # Defaults to localhost:9000 — override in production, or uploaded
+  # image URLs will point at localhost and fail to load.
+  BACKEND_URL: ${BACKEND_URL:-http://localhost:9000}
   # Session cookie — Medusa production defaults to Secure+SameSite=None,
   # which breaks plain HTTP deployments. Override via .env:
   #   COOKIE_SECURE=true  COOKIE_SAME_SITE=lax   (HTTPS / reverse-proxy TLS)

@@ -89,6 +89,10 @@ STORE_CORS=https://shop.example.com
 ADMIN_CORS=https://api.example.com
 AUTH_CORS=https://api.example.com
 
+# 后端公网地址（无尾斜杠）。本地文件模块用它拼接上传文件（商品图片等）的绝对 URL。
+# 不填则默认 http://localhost:9000，生产环境必须改成实际访问地址，否则图片地址指向 localhost。
+BACKEND_URL=https://api.example.com
+
 # Cookie 安全：HTTPS 正式部署必须显式开启 Secure
 # （docker-compose 默认 COOKIE_SECURE=false 仅适配 HTTP 测试）
 COOKIE_SECURE=true
@@ -168,6 +172,9 @@ ADMIN_CORS=https://api.example.com
 AUTH_CORS=https://api.example.com
 STORE_CORS=https://shop.example.com
 
+# 后端公网地址（无尾斜杠）。不填则图片 URL 指向 localhost。
+BACKEND_URL=https://api.example.com
+
 # Cookie 安全：HTTPS 正式部署必须显式开启 Secure
 COOKIE_SECURE=true
 COOKIE_SAME_SITE=lax
@@ -210,6 +217,7 @@ REDIS_URL=redis://:pass@redis.example.com:6379/0
 | `STORE_CORS` | Store API 允许来源，逗号分隔 | 否 | `http://localhost:8000` |
 | `ADMIN_CORS` | Admin 允许来源 | 否 | `http://localhost:9000` |
 | `AUTH_CORS` | 认证端点允许来源 | 否 | `http://localhost:9000` |
+| `BACKEND_URL` | 后端公网地址（无尾斜杠）。本地文件模块据此拼接上传文件（商品图片等）的绝对 URL，必须与用户实际访问地址一致 | 否 | `http://localhost:9000` |
 | `COOKIE_SECURE` | Session Cookie 是否仅 HTTPS 发送。HTTPS 正式部署设 `true`，HTTP 测试部署设 `false` | 否 | `false` |
 | `COOKIE_SAME_SITE` | Session Cookie 的 SameSite 属性（`lax`/`strict`/`none`） | 否 | `lax` |
 | `MEDUSA_IMAGE` | 使用的镜像 | 否 | `qyg2297248353/medusa:latest` |
@@ -260,6 +268,9 @@ docker compose down -v
 
 **Q: Admin 后台登录失败 / 跨域报错？**
 确认访问 Admin 的地址已包含在 `ADMIN_CORS` 与 `AUTH_CORS` 中（含协议与端口），改完 `.env` 后执行 `docker compose up -d` 使配置生效。
+
+**Q: 上传的商品图片保存后显示为 `localhost:9000` 地址、无法加载？**
+这是因为后端公网地址 `BACKEND_URL` 未配置，Medusa 本地文件模块默认用 `http://localhost:9000/static` 拼接图片的绝对 URL 并写入数据库。解决方法：在 `.env` 中设置 `BACKEND_URL` 为用户实际访问后端的地址（含协议、主机、端口，无尾斜杠），例如 `BACKEND_URL=https://api.example.com`，然后 `docker compose up -d` 重启。注意：此前已上传、URL 已固化为 `localhost:9000` 的图片需要重新上传（或在数据库中批量替换 `file` 表的 `url` 字段）才能生效。生产环境建议改用 S3 等对象存储，而非本地文件模块。
 
 **Q: 登录接口返回成功但始终跳回登录页？**
 这是 **Session Cookie 未写入** 的典型症状。Medusa 生产模式（`NODE_ENV=production`）默认给 Cookie 加 `Secure` 标记，浏览器在 `http://IP:9000/app` 这种纯 HTTP 场景下会**静默拒绝写入 Secure Cookie**，表现为登录 `/auth/user` 返回 `200` 但后续请求不带会话 Cookie。
