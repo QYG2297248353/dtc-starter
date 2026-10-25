@@ -1,6 +1,6 @@
 "use client"
 
-import { isManual, isStripeLike } from "@lib/constants"
+import { isAlipay, isAlipayQr, isManual, isStripeLike } from "@lib/constants"
 import { placeOrder } from "@lib/data/cart"
 import { HttpTypes } from "@medusajs/types"
 import { Button } from "@modules/common/components/ui"
@@ -39,6 +39,14 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
     case isManual(paymentSession?.provider_id):
       return (
         <ManualTestPaymentButton notReady={notReady} data-testid={dataTestId} />
+      )
+    case isAlipay(paymentSession?.provider_id):
+      return (
+        <AlipayPaymentButton
+          cart={cart}
+          notReady={notReady}
+          data-testid={dataTestId}
+        />
       )
     default:
       return <Button disabled>Select a payment method</Button>
@@ -190,6 +198,73 @@ const ManualTestPaymentButton = ({ notReady }: { notReady: boolean }) => {
       <ErrorMessage
         error={errorMessage}
         data-testid="manual-payment-error-message"
+      />
+    </>
+  )
+}
+
+// fork-addition: Alipay redirect flow. The order is completed by the return
+// route (or by the async notification when the customer closes the browser).
+const AlipayPaymentButton = ({
+  cart,
+  notReady,
+  "data-testid": dataTestId,
+}: {
+  cart: HttpTypes.StoreCart
+  notReady: boolean
+  "data-testid"?: string
+}) => {
+  const [submitting, setSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const paymentSession = cart.payment_collection?.payment_sessions?.find(
+    (session) => session.status === "pending"
+  )
+  const paymentUrl = paymentSession?.data?.payment_url
+  const isQrPayment = isAlipayQr(paymentSession?.provider_id)
+
+  if (isQrPayment) {
+    return (
+      <>
+        <Button disabled size="large" data-testid={dataTestId}>
+          Waiting for Alipay QR payment
+        </Button>
+        <ErrorMessage
+          error="Go back to the payment step, scan the QR code, and wait for confirmation."
+          data-testid="alipay-qr-payment-error-message"
+        />
+      </>
+    )
+  }
+
+  const handlePayment = () => {
+    if (typeof paymentUrl !== "string" || !paymentUrl) {
+      setErrorMessage(
+        "The Alipay payment link is missing. Refresh the page and try again."
+      )
+      return
+    }
+
+    // Alipay completes the payment on its cashier page. The async notification
+    // (or the return route) then completes the cart on the backend.
+    setSubmitting(true)
+    window.location.assign(paymentUrl)
+  }
+
+  return (
+    <>
+      <Button
+        disabled={notReady || submitting}
+        isLoading={submitting}
+        onClick={handlePayment}
+        size="large"
+        data-testid={dataTestId}
+      >
+        Pay with Alipay
+      </Button>
+      <ErrorMessage
+        error={errorMessage}
+        data-testid="alipay-payment-error-message"
       />
     </>
   )

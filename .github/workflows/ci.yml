@@ -1,0 +1,79 @@
+# Lint, unit-test and build the backend on every push/PR.
+#
+# The Docker image workflow only runs on release pushes, so this catches
+# TypeScript/lint/test regressions earlier. The storefront is type-checked too;
+# it has no test suite and is not part of the backend image.
+name: CI
+
+on:
+  push:
+    branches: [main, release]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      # Build-time placeholders; the build does not connect to the database.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/medusa
+      JWT_SECRET: ci-only-secret
+      COOKIE_SECRET: ci-only-secret
+      STORE_CORS: http://localhost:8000
+      ADMIN_CORS: http://localhost:9000
+      AUTH_CORS: http://localhost:9000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint backend
+        run: pnpm --filter @dtc/backend lint
+
+      - name: Unit tests
+        run: pnpm --filter @dtc/backend test:unit
+
+      - name: Build backend
+        run: pnpm --filter @dtc/backend build
+
+  storefront:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The storefront's ESLint config currently reports pre-existing errors in
+      # unrelated files, so CI checks types instead of running `next lint`.
+      - name: Type-check storefront
+        run: pnpm --filter @dtc/storefront exec tsc --noEmit

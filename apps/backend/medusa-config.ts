@@ -12,6 +12,32 @@ const cookieSameSite = (process.env.COOKIE_SAME_SITE || "lax") as "lax" | "stric
 // Trailing slashes are stripped so BACKEND_URL=.../ and ...://host both work.
 const backendUrl = (process.env.BACKEND_URL || "http://localhost:9000").replace(/\/+$/, "")
 
+// fork-addition: Alipay payment provider. It is registered only when the
+// application credentials are present, so deployments that do not use Alipay
+// keep the stock payment module (Manual / pp_system_default only).
+const alipayConfigured = Boolean(
+  process.env.ALIPAY_APP_ID &&
+    process.env.ALIPAY_PRIVATE_KEY &&
+    process.env.ALIPAY_PUBLIC_KEY
+)
+
+const alipayProvider = {
+  resolve: "./src/modules/payment-alipay",
+  // No `id` on purpose: the module exports three providers whose identifiers
+  // become pp_alipay_pc, pp_alipay_h5 and pp_alipay_qr. The merchant enables
+  // the subsets they need per Region in the Admin.
+  options: {
+    app_id: process.env.ALIPAY_APP_ID,
+    private_key: process.env.ALIPAY_PRIVATE_KEY,
+    alipay_public_key: process.env.ALIPAY_PUBLIC_KEY,
+    gateway: process.env.ALIPAY_GATEWAY,
+    notify_url: process.env.ALIPAY_NOTIFY_URL,
+    return_url: process.env.ALIPAY_RETURN_URL,
+    seller_id: process.env.ALIPAY_SELLER_ID,
+    subject_prefix: process.env.ALIPAY_SUBJECT_PREFIX,
+  },
+}
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -32,6 +58,15 @@ module.exports = defineConfig({
   // fork-addition: file module — pin the local provider's public URL so
   // uploaded files get absolute URLs on the real deployment domain.
   modules: [
+    // fork-addition: register the Alipay payment provider when configured.
+    ...(alipayConfigured
+      ? [
+          {
+            resolve: "@medusajs/medusa/payment",
+            options: { providers: [alipayProvider] },
+          },
+        ]
+      : []),
     {
       resolve: "@medusajs/medusa/file",
       options: {

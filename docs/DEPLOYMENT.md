@@ -2,9 +2,9 @@
 
 本文档介绍如何通过 GitHub Actions 构建 Docker 镜像，并用 Docker Compose 部署 **Medusa 后端**（不含 storefront 前端）。PostgreSQL 与 Redis 既可以用 compose 内置的容器，也可以用外部服务——全部通过环境变量配置，无需改代码。
 
-> 本仓库 fork 自 [medusajs/dtc-starter](https://github.com/medusajs/dtc-starter)。为便于后续升级，部署相关文件（`Dockerfile`、`.dockerignore`、`docker-compose.yml`、`docker-compose.external.yml`、`.env.example`、`.github/workflows/docker.yml`、`.github/workflows/sync-fork.yml`）均为**纯新增**。
+> 本仓库 fork 自 [medusajs/dtc-starter](https://github.com/medusajs/dtc-starter)。为便于后续升级，部署相关文件（`Dockerfile`、`.dockerignore`、`docker-compose.yml`、`docker-compose.external.yml`、`.env.example`、`.github/workflows/docker.yml`、`.github/workflows/sync-fork.yml`、`.github/workflows/ci.yml`）均为**纯新增**；支付宝支付 provider（`apps/backend/src/modules/payment-alipay/`）及其启用脚本也是新增目录/文件。
 >
-> 唯一改动的上游文件是 [apps/backend/medusa-config.ts](../apps/backend/medusa-config.ts)，且只做**追加式**修改（`fork-addition` 注释标记）：`cookieOptions` 与文件模块的 `backend_url`。这两项在上游配置里没有任何环境变量兜底（`@medusajs/file-local` 的 `backend_url` 只读 options），不改就无法部署到非 `localhost:9000` 的地址。上游该文件仅 15 行且极少变动，冲突面很小；冲突时保留 fork 的追加段即可。
+> 改动的上游文件均只做**追加式**修改（`fork-addition` 注释标记）：[apps/backend/medusa-config.ts](../apps/backend/medusa-config.ts)（`cookieOptions`、文件模块 `backend_url`、支付宝 provider 注册）、[initial-data-seed.ts](../apps/backend/src/migration-scripts/initial-data-seed.ts)（新库自动启用支付宝）以及 storefront 的支付选项/按钮/常量。storefront 还新增了 `qrcode.react` 依赖用于展示扫码支付二维码（已同步 `pnpm-lock.yaml`）。上游这些位置变动少，冲突时保留 `fork-addition` 段即可。
 
 ## 架构概览
 
@@ -223,10 +223,51 @@ REDIS_URL=redis://:pass@redis.example.com:6379/0
 | `BACKEND_URL` | 后端公网地址：含协议/主机/端口、无尾斜杠。本地文件模块据此拼接上传文件（商品图片等）的绝对 URL，必须与用户实际访问地址一致 | 否 | `http://localhost:9000` |
 | `COOKIE_SECURE` | Session Cookie 是否仅 HTTPS 发送。HTTPS 正式部署设 `true`，HTTP 测试部署设 `false` | 否 | `false` |
 | `COOKIE_SAME_SITE` | Session Cookie 的 SameSite 属性（`lax`/`strict`/`none`） | 否 | `lax` |
+| `ALIPAY_APP_ID` | 支付宝应用 ID；与私钥、公钥同时非空才会注册支付 provider | 启用支付宝时 | 无 |
+| `ALIPAY_PRIVATE_KEY` | 应用私钥，PEM 或单行 + 字面量 `\n` | 启用支付宝时 | 无 |
+| `ALIPAY_PUBLIC_KEY` | 支付宝公钥（验签用，不是应用公钥） | 启用支付宝时 | 无 |
+| `ALIPAY_GATEWAY` | 支付宝网关。沙箱：`https://openapi-sandbox.dl.alipaydev.com/gateway.do` | 否 | 生产网关 |
+| `ALIPAY_NOTIFY_URL` | 异步通知地址，必须公网可达 | 否 | `${BACKEND_URL}/webhooks/alipay` |
+| `ALIPAY_RETURN_URL` | 默认同步回跳地址；storefront 会按购物车覆盖 | 否 | 无 |
+| `ALIPAY_SELLER_ID` | 配置后校验通知中的 seller_id | 否 | 无 |
+| `ALIPAY_SUBJECT_PREFIX` | 支付宝订单标题前缀 | 否 | `Order` |
 | `MEDUSA_IMAGE` | 使用的镜像 | 否 | `qyg2297248353/medusa:latest` |
 | `PORT` | 宿主机映射端口 | 否 | `9000` |
 
-> 镜像内不含任何 `.env`，所有配置运行时注入，镜像可安全公开分发。请勿把真实 `.env` 提交进仓库（已被 `.gitignore` 与 `.dockerignore` 排除）。
+> 镜像内不含任何 `.env`，所有配置运行时注入，镜像可安全公开分发。请勿把真实 `.env` 提交进仓库（已被 `.gitignore` 与 `.dockerignore` 排除）。中文配置示例见 [.env.cn.example](../.env.cn.example)。
+
+### 支付宝支付（可选）
+
+默认支付方式只有 Manual（`pp_system_default`）。配置 `ALIPAY_APP_ID`、`ALIPAY_PRIVATE_KEY`、`ALIPAY_PUBLIC_KEY` 后，后端会注册三个独立 Provider：
+
+| Provider ID | 商城显示名称 | 接口 |
+| --- | --- | --- |
+| `pp_alipay_pc` | Alipay (PC) | `alipay.trade.page.pay` |
+| `pp_alipay_h5` | Alipay (H5) | `alipay.trade.wap.pay` |
+| `pp_alipay_qr` | Alipay (QR) | `alipay.trade.precreate` |
+
+1. 支付宝开放平台创建应用，按需开通电脑网站支付 / 手机网站支付 / 当面付，异步通知地址填
+   `https://<后端域名>/webhooks/alipay`。
+2. 在 `.env` 填入三项凭证并 `docker compose up -d`；完整变量、默认值和示例见
+   [.env.cn.example](../.env.cn.example)。
+3. 启用 Region：
+
+```bash
+# 新库：migrate 的 seed 已自动启用三个 Provider
+# 存量库：执行一次幂等脚本（生产镜像内是编译后的 .js；会清理旧 pp_alipay_alipay）
+docker compose exec backend ./node_modules/.bin/medusa exec ./src/scripts/enable-alipay.js
+```
+
+4. 到 Admin → Settings → Regions → 编辑 Region → Payment providers，按实际开通的产品保留
+   Alipay (PC) / Alipay (H5) / Alipay (QR) 中的一个或多个。
+5. 支付流程：
+   - PC/H5：跳转支付宝收银台；回跳 `/api/payment-return/alipay/[cartId]` 完成下单，或由异步通知兜底。
+   - QR：后端预下单返回 `qr_code`，storefront 展示二维码并轮询 `/store/alipay/status`。
+6. 异步通知走专用路由 `/webhooks/alipay`，验签、app_id/seller_id、金额、币种、payment session 全部通过后才会更新支付；成功返回纯文本 `success`。退款调用 `alipay.trade.refund`，以退款记录的 idempotency key 作为 `out_request_no`；重复调用不会重复退款。
+
+> 本 fork 没有注册 Stripe Provider，只接支付宝时 **不需要** `STRIPE_API_KEY` / `STRIPE_WEBHOOK_SECRET`；填了也不会生效。需要 Stripe 时请另行安装并注册 `@medusajs/medusa/payment-stripe`。
+
+> 详细说明（沙箱、币种、签名校验、密钥格式）见 [.github/README.md](../.github/README.md#支付宝支付可选)。
 
 ## 六、升级与回滚
 

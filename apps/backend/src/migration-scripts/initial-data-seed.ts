@@ -97,6 +97,25 @@ export default async function initial_data_seed({
   });
 
   logger.info("Seeding region data...");
+  // fork-addition: include Alipay when its credentials are configured, so a
+  // fresh Alipay deployment is checkout-ready without a manual Admin step.
+  // Manual (pp_system_default) is a Medusa built-in provider and is always
+  // registered; this only adds it to the seeded Region. Merchants can remove
+  // it (or any Alipay mode) later in Admin > Settings > Regions.
+  // Existing databases can be updated with `medusa exec ./src/scripts/enable-alipay.ts`.
+  const paymentProviders = ["pp_system_default"];
+  if (
+    process.env.ALIPAY_APP_ID &&
+    process.env.ALIPAY_PRIVATE_KEY &&
+    process.env.ALIPAY_PUBLIC_KEY
+  ) {
+    paymentProviders.push(
+      "pp_alipay_pc",
+      "pp_alipay_h5",
+      "pp_alipay_qr"
+    );
+  }
+
   const { result: regionResult } = await createRegionsWorkflow(container).run({
     input: {
       regions: [
@@ -104,7 +123,7 @@ export default async function initial_data_seed({
           name: "Europe",
           currency_code: "eur",
           countries,
-          payment_providers: ["pp_system_default"],
+          payment_providers: paymentProviders,
           metadata: DEFAULT_REGION_STORE_POLICIES,
         },
       ],

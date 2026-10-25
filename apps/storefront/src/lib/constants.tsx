@@ -1,4 +1,5 @@
 import { CreditCard } from "@medusajs/icons"
+import Alipay from "@modules/common/icons/alipay"
 import Bancontact from "@modules/common/icons/bancontact"
 import Ideal from "@modules/common/icons/ideal"
 import PayPal from "@modules/common/icons/paypal"
@@ -29,6 +30,19 @@ export const paymentInfoMap: Record<
     title: "PayPal",
     icon: <PayPal />,
   },
+  // fork-addition: three Alipay providers (see apps/backend/src/modules/payment-alipay)
+  pp_alipay_pc: {
+    title: "Alipay (PC)",
+    icon: <Alipay />,
+  },
+  pp_alipay_h5: {
+    title: "Alipay (H5)",
+    icon: <Alipay />,
+  },
+  pp_alipay_qr: {
+    title: "Alipay (QR)",
+    icon: <Alipay />,
+  },
   pp_system_default: {
     title: "Manual Payment",
     icon: <CreditCard />,
@@ -45,6 +59,13 @@ export const isStripeLike = (providerId?: string) => {
 
 export const isPaypal = (providerId?: string) => {
   return providerId?.startsWith("pp_paypal")
+}
+// fork-addition: Alipay providers (PC/H5 redirect, QR pre-create).
+export const isAlipay = (providerId?: string) => {
+  return providerId?.startsWith("pp_alipay")
+}
+export const isAlipayQr = (providerId?: string) => {
+  return providerId?.startsWith("pp_alipay_qr")
 }
 export const isManual = (providerId?: string) => {
   return providerId?.startsWith("pp_system_default")

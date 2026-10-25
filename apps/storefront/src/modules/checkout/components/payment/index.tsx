@@ -1,6 +1,7 @@
 "use client"
 import { RadioGroup } from "@headlessui/react"
-import { isStripeLike, paymentInfoMap } from "@lib/constants"
+import { isAlipay, isAlipayQr, isStripeLike, paymentInfoMap } from "@lib/constants"
+import { sdk } from "@lib/config"
 import { initiatePaymentSession } from "@lib/data/cart"
 import { CheckCircleSolid, CreditCard } from "@medusajs/icons"
 import ErrorMessage from "@modules/checkout/components/error-message"
@@ -16,8 +17,21 @@ import {
   clx,
 } from "@modules/common/components/ui"
 import { HttpTypes } from "@medusajs/types"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import {
+  useParams,
+  usePathname,
+  useRouter,
+  useSearchParams,
+} from "next/navigation"
+import { QRCodeSVG } from "qrcode.react"
 import { useCallback, useEffect, useState } from "react"
+
+type AlipaySessionData = {
+  session_id?: string
+  method?: "pc" | "h5" | "qr"
+  payment_url?: string
+  qr_code?: string
+}
 
 const Payment = ({
   cart,
@@ -36,20 +50,54 @@ const Payment = ({
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
     activeSession?.provider_id ?? ""
   )
+  const [alipayData, setAlipayData] = useState<AlipaySessionData | null>(
+    isAlipay(activeSession?.provider_id)
+      ? (activeSession?.data as AlipaySessionData)
+      : null
+  )
 
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
+  const { countryCode } = useParams<{ countryCode?: string }>()
 
   const isOpen = searchParams.get("step") === "payment"
+
+  // fork-addition: Alipay sessions are created as soon as the provider is
+  // selected so QR data / cashier URL is ready for the review step.
+  const initiateSession = async (providerId: string) => {
+    const response = await initiatePaymentSession(cart, {
+      provider_id: providerId,
+      ...(isAlipay(providerId)
+        ? {
+            data: {
+              return_url: `${window.location.origin}/api/payment-return/alipay/${
+                cart.id
+              }${countryCode ? `?country_code=${countryCode}` : ""}`,
+            },
+          }
+        : {}),
+    })
+
+    if (isAlipay(providerId)) {
+      const session = response.payment_collection?.payment_sessions?.find(
+        (paymentSession) => paymentSession.status === "pending"
+      )
+      setAlipayData((session?.data as AlipaySessionData) ?? null)
+    }
+
+    return response
+  }
 
   const setPaymentMethod = async (method: string) => {
     setError(null)
     setSelectedPaymentMethod(method)
-    if (isStripeLike(method)) {
-      await initiatePaymentSession(cart, {
-        provider_id: method,
-      })
+    if (isStripeLike(method) || isAlipay(method)) {
+      try {
+        await initiateSession(method)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
     }
   }
 
@@ -59,6 +107,7 @@ const Payment = ({
 
   const paymentReady =
     (activeSession && (cart?.shipping_methods?.length ?? 0) !== 0) || paidByGiftcard
+  const isQrPayment = isAlipayQr(selectedPaymentMethod)
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
@@ -86,9 +135,7 @@ const Payment = ({
         activeSession?.provider_id === selectedPaymentMethod
 
       if (!checkActiveSession) {
-        await initiatePaymentSession(cart, {
-          provider_id: selectedPaymentMethod,
-        })
+        await initiateSession(selectedPaymentMethod)
       }
 
       if (!shouldInputPaymentDetails) {
@@ -109,6 +156,62 @@ const Payment = ({
   useEffect(() => {
     setError(null)
   }, [isOpen])
+
+  // fork-addition: QR payments don't redirect the browser. Poll the backend
+  // status endpoint (the webhook updates the session) and navigate to the order
+  // confirmation as soon as Alipay confirms payment.
+  useEffect(() => {
+    const sessionId = alipayData?.session_id
+
+    if (!isAlipayQr(selectedPaymentMethod) || !sessionId) {
+      return
+    }
+
+    let cancelled = false
+
+    const checkStatus = async () => {
+      try {
+        const result = await sdk.client.fetch<{
+          status: string
+          order_id: string | null
+        }>("/store/alipay/status", {
+          method: "GET",
+          query: { session_id: sessionId },
+          cache: "no-store",
+        })
+
+        if (cancelled) {
+          return
+        }
+
+        if (result.order_id) {
+          router.push(
+            `/${countryCode ?? ""}/order/${result.order_id}/confirmed`
+          )
+          return
+        }
+
+        if (result.status === "canceled") {
+          setError("The Alipay payment was closed or canceled.")
+        }
+      } catch {
+        // Transient polling errors are ignored; the next tick retries.
+      }
+    }
+
+    void checkStatus()
+    const timer = setInterval(checkStatus, 3000)
+
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [
+    alipayData?.session_id,
+    countryCode,
+    router,
+    selectedPaymentMethod,
+  ])
 
   return (
     <div className="bg-white">
@@ -166,6 +269,29 @@ const Payment = ({
                   </div>
                 ))}
               </RadioGroup>
+
+              {isAlipayQr(selectedPaymentMethod) && (
+                <div className="mt-2 mb-4 rounded-rounded border border-ui-border-base p-4">
+                  <Text className="txt-medium-plus text-ui-fg-base mb-2">
+                    Scan with the Alipay app
+                  </Text>
+
+                  {alipayData?.qr_code ? (
+                    <div className="flex flex-col items-start gap-2">
+                      <div className="bg-white p-2 rounded-rounded border border-ui-border-base">
+                        <QRCodeSVG value={alipayData.qr_code} size={176} />
+                      </div>
+                      <Text className="txt-medium text-ui-fg-subtle">
+                        This page updates automatically after payment.
+                      </Text>
+                    </div>
+                  ) : (
+                    <Text className="txt-medium text-ui-fg-subtle">
+                      Generating Alipay QR code...
+                    </Text>
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -195,13 +321,16 @@ const Payment = ({
             isLoading={isLoading}
             disabled={
               (isStripeLike(selectedPaymentMethod) && !paymentComplete) ||
+              isQrPayment ||
               (!selectedPaymentMethod && !paidByGiftcard)
             }
             data-testid="submit-payment-button"
           >
-            {!activeSession && isStripeLike(selectedPaymentMethod)
-              ? "Enter payment details"
-              : "Continue to review"}
+            {isQrPayment
+              ? "Waiting for Alipay payment..."
+              : !activeSession && isStripeLike(selectedPaymentMethod)
+                ? "Enter payment details"
+                : "Continue to review"}
           </Button>
         </div>
 

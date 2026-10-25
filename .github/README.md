@@ -9,16 +9,23 @@
 ```
 .
 ├── apps/backend/          # Medusa 后端（API + Admin 后台）
-│   └── medusa-config.ts   # fork 追加了 cookieOptions 与文件模块 backend_url（均 env 驱动）
+│   ├── medusa-config.ts   # fork 追加了 cookieOptions、文件模块 backend_url、支付宝 provider 注册（均 env 驱动）
+│   └── src/
+│       ├── modules/payment-alipay/   # 支付宝支付 provider（新增）
+│       ├── api/webhooks/alipay/      # 异步通知（返回纯文本 success，新增）
+│       ├── api/store/alipay/status/  # 扫码支付状态轮询（新增）
+│       └── scripts/enable-alipay.ts  # 存量库启用支付宝（新增）
 ├── apps/storefront/       # Next.js 前端（可选，不参与 Docker 构建）
+│   └── src/app/api/payment-return/alipay/  # 支付回跳（新增）
 ├── Dockerfile             # 多阶段构建，node:22-alpine，仅 backend
 ├── docker-compose.yml     # 内置 PG + Redis，开箱即用
 ├── docker-compose.external.yml   # 外部 PG + Redis
 ├── .env.example           # 部署环境变量模板
+├── .env.cn.example        # 同上的中文注解版（推荐新用户使用）
 └── docs/DEPLOYMENT.md     # 完整部署文档
 ```
 
-fork 新增的所有文件都放在仓库根目录，不改上游源码。仅有的例外（用 `// fork-addition:` 注释标记）：`medusa-config.ts` 里的 Cookie 配置与本地文件模块的 `backend_url`——后者没有环境变量兜底，不配会把上传图片的 URL 写成 `localhost:9000`。上游每日自动同步，冲突时会自动开 PR 处理。
+fork 新增的文件（部署配置、支付宝 provider、通知路由、扫码状态接口、storefront 回跳路由）都独立存放，不改上游既有逻辑。确需在上游文件里追加的少量代码都带 `// fork-addition:` 注释：`medusa-config.ts`（Cookie、文件模块 `backend_url`、支付宝 provider 注册）、`initial-data-seed.ts`（新库自动启用支付宝），以及 storefront 的支付选项/按钮/常量三处。支付宝实现本身全部在新增目录 `apps/backend/src/modules/payment-alipay/` 内。上游每日自动同步，冲突时会自动开 PR 处理。
 
 ---
 
@@ -70,6 +77,112 @@ docker compose -f docker-compose.external.yml up -d
 
 ---
 
+## 支付宝支付（可选）
+
+默认只有 Manual（`pp_system_default`）。填写支付宝应用凭证并重启后，后端会自动注册 **三个独立支付 Provider**；它们彼此独立，商户在 Admin 中按实际开通的产品勾选一个或多个：
+
+| Provider ID | 商城显示名称 | 支付宝接口 | 需要开通的产品 |
+| --- | --- | --- | --- |
+| `pp_alipay_pc` | Alipay (PC) | `alipay.trade.page.pay` | 电脑网站支付 |
+| `pp_alipay_h5` | Alipay (H5) | `alipay.trade.wap.pay` | 手机网站支付 |
+| `pp_alipay_qr` | Alipay (QR) | `alipay.trade.precreate` | 当面付（扫码） |
+
+> 用户至少开通一种即可。新库 seed 会把三个都加入默认 Region；存量库执行下面的启用脚本也会三个都加入。之后可在
+> **Admin → Settings → Regions → 编辑 Region → Payment providers** 中看到这三个 Provider，并取消不需要的模式。
+> 取消后该模式不会出现在商城结账页，但不影响其他两个。
+>
+> 内置的 Manual（`pp_system_default`）由 Medusa 始终注册，**没有环境变量开关**；新库 seed 默认把它加入 Region，
+> 是否需要它在结账页出现，请直接在 Admin 的 Region 支付方式里勾选/取消。
+
+### 1. 支付宝开放平台准备
+
+1. 在[支付宝开放平台](https://open.alipay.com)创建应用。
+2. 按需要开通：电脑网站支付、手机网站支付、当面付（扫码）。
+3. 使用 RSA2 密钥；应用私钥只保存在后端。
+4. 异步通知地址填：`https://<后端域名>/webhooks/alipay`
+   （也可以用 `ALIPAY_NOTIFY_URL` 显式指定；必须公网 HTTPS 可达，不能是 localhost）。
+
+### 2. 配置环境变量
+
+可以复制 [.env.cn.example](../.env.cn.example)（中文注解）或 [.env.example](../.env.example)：
+
+```bash
+cp .env.cn.example .env
+```
+
+最少填写以下三项，支付宝才会启用：
+
+```dotenv
+ALIPAY_APP_ID=2021000000000000
+# 应用私钥：可整段 PEM，也可单行 + 字面量 \n
+ALIPAY_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----
+# 支付宝公钥（不是应用公钥）
+ALIPAY_PUBLIC_KEY=MIIBIjANBg...
+```
+
+完整变量说明：
+
+| 变量 | 必填 | 默认值 | 可填写内容 / 示例 |
+| --- | --- | --- | --- |
+| `ALIPAY_APP_ID` | 启用支付宝时必填 | — | 开放平台应用 APPID，如 `2021000000000000` |
+| `ALIPAY_PRIVATE_KEY` | 启用支付宝时必填 | — | 应用私钥。完整 PEM，或单行 + 字面量 `\n`；Node 推荐「非 Java」PKCS#8 |
+| `ALIPAY_PUBLIC_KEY` | 启用支付宝时必填 | — | 支付宝公钥（不是应用公钥），用于通知/响应验签 |
+| `ALIPAY_GATEWAY` | 否 | 生产网关 `https://openapi.alipay.com/gateway.do` | 沙箱填 `https://openapi-sandbox.dl.alipaydev.com/gateway.do` |
+| `ALIPAY_NOTIFY_URL` | 否 | `${BACKEND_URL}/webhooks/alipay` | 公网 HTTPS 地址，如 `https://api.example.com/webhooks/alipay` |
+| `ALIPAY_RETURN_URL` | 否 | 空（storefront 按购物车生成） | 自建前端时可填 `https://shop.example.com/order/confirmed` |
+| `ALIPAY_SELLER_ID` | 否 | 空（不校验） | 企业支付宝 PID，如 `2088xxxxxxxxxxxx`；填写后会校验通知 |
+| `ALIPAY_SUBJECT_PREFIX` | 否 | `Order` | 支付宝订单标题前缀，如 `MyShop Order` |
+
+> 产品码由支付产品固定，不需要配置：PC 为 `FAST_INSTANT_TRADE_PAY`，H5 为 `QUICK_WAP_WAY`，扫码为 `FACE_TO_FACE_PAYMENT`。
+
+### 3. 启用 Region
+
+```bash
+# 新库：db:migrate 的初始 seed 已自动启用三个 Alipay Provider
+docker compose up -d
+
+# 存量库：执行一次（幂等；会启用 pc/h5/qr，并清理旧的 pp_alipay_alipay）
+docker compose exec backend ./node_modules/.bin/medusa exec ./src/scripts/enable-alipay.js
+```
+
+然后到 Admin 的 Region 编辑页确认。正常情况下 **Payment providers 会看到 Alipay (PC)、Alipay (H5)、Alipay (QR) 三项**，按需保留。
+
+### 4. 各模式的结账流程
+
+- `Alipay (PC)` / `Alipay (H5)`：storefront 跳转到支付宝收银台；支付完成后由
+  `/api/payment-return/alipay/[cartId]` 完成购物车，或由异步通知兜底。
+- `Alipay (QR)`：后端调用 `alipay.trade.precreate` 返回 `qr_code`，storefront 渲染二维码并轮询
+  `/store/alipay/status`；异步通知到达后自动跳转订单确认页。
+- 自定义前端：读取 payment session 的 `data.payment_url`（PC/H5）或 `data.qr_code`（QR）。
+
+### 5. 沙箱
+
+```dotenv
+ALIPAY_GATEWAY=https://openapi-sandbox.dl.alipaydev.com/gateway.do
+```
+
+使用沙箱应用的 APPID / 私钥 / 支付宝公钥，并按沙箱买家账号付款。沙箱通常按 **CNY** 测试；如果默认 Region 是 EUR，需要准备 CNY Region 或确认商户支持跨境 EUR。
+
+### 6. 金额、通知与安全
+
+- 金额按 Medusa 货币主单位换算为支付宝 `total_amount`（两位小数）；人民币之外的币种走支付宝跨境收单，需商户号已开通。
+- 异步通知必须返回纯文本 `success`。本 fork 使用专用路由 `/webhooks/alipay`，而不是 Medusa 通用
+  `/hooks/payment/:provider`，因为后者返回空 200，会让支付宝持续重试。
+- 通知会校验 RSA2 签名、`app_id`、可选 `seller_id`、`out_trade_no`（必须是 Medusa payment session ID），
+  并要求通知金额/币种与本地 session 完全一致；任一不一致返回 `failure`，不会改动支付状态。
+- 退款使用 `alipay.trade.refund`，以退款记录的 idempotency key 作为 `out_request_no`，重复调用不会重复退款。
+
+### 7. 需要 STRIPE_API_KEY 吗？
+
+**只接支付宝时不需要。** 本 fork 没有在 `medusa-config.ts` 中注册 Stripe Provider，所以：
+
+- `STRIPE_API_KEY`、`STRIPE_WEBHOOK_SECRET` 都不需要填写，填了也不会生效。
+- Storefront 里的 `NEXT_PUBLIC_STRIPE_KEY` 只对 Stripe 前端组件有意义；没有后端 Stripe Provider 时也用不上。
+- 如果你之后确实要接 Stripe，需要另外安装/注册 `@medusajs/medusa/payment-stripe`，再配置 `STRIPE_API_KEY`；生产环境还需要 `STRIPE_WEBHOOK_SECRET` 和 `/hooks/payment/stripe_stripe`。
+- 其它未注册的支付 Provider 同理，不需要对应的环境变量。
+
+---
+
 ## 环境变量速查
 
 | 变量 | 必填 | 默认 | 说明 |
@@ -84,6 +197,14 @@ docker compose -f docker-compose.external.yml up -d
 | `BACKEND_URL` | 非 localhost 部署时必填 | `http://localhost:9000` | 后端公网地址：含协议/主机/端口、无尾斜杠。决定上传图片等文件的绝对 URL |
 | `COOKIE_SECURE` | 否 | `false` | Session Cookie 是否仅 HTTPS 发送 |
 | `COOKIE_SAME_SITE` | 否 | `lax` | Session Cookie 的 SameSite 属性 |
+| `ALIPAY_APP_ID` | 启用支付宝时必填 | — | 支付宝应用 ID |
+| `ALIPAY_PRIVATE_KEY` | 启用支付宝时必填 | — | 应用私钥（PEM 或单行 `\n`） |
+| `ALIPAY_PUBLIC_KEY` | 启用支付宝时必填 | — | 支付宝公钥（验签用） |
+| `ALIPAY_GATEWAY` | 否 | 生产网关 | 沙箱网关：`https://openapi-sandbox.dl.alipaydev.com/gateway.do` |
+| `ALIPAY_NOTIFY_URL` | 否 | `${BACKEND_URL}/webhooks/alipay` | 异步通知地址，必须公网可达 |
+| `ALIPAY_RETURN_URL` | 否 | — | 默认同步回跳地址；storefront 会按购物车覆盖 |
+| `ALIPAY_SELLER_ID` | 否 | — | 配置后校验通知中的 seller_id |
+| `ALIPAY_SUBJECT_PREFIX` | 否 | `Order` | 支付宝订单标题前缀 |
 | `MEDUSA_IMAGE` | 否 | `qyg2297248353/medusa:latest` | 使用的镜像 |
 | `PORT` | 否 | `9000` | 宿主机映射端口 |
 

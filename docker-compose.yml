@@ -40,6 +40,16 @@ x-backend-env: &backend-env
   #   COOKIE_SECURE=false COOKIE_SAME_SITE=lax  (plain HTTP test deploy)
   COOKIE_SECURE: ${COOKIE_SECURE:-false}
   COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
+  # Alipay (optional). The provider is disabled while these are empty.
+  # See .env.example for how to configure the keys and notify URL.
+  ALIPAY_APP_ID: ${ALIPAY_APP_ID:-}
+  ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:-}
+  ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-}
+  ALIPAY_GATEWAY: ${ALIPAY_GATEWAY:-}
+  ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL:-}
+  ALIPAY_RETURN_URL: ${ALIPAY_RETURN_URL:-}
+  ALIPAY_SELLER_ID: ${ALIPAY_SELLER_ID:-}
+  ALIPAY_SUBJECT_PREFIX: ${ALIPAY_SUBJECT_PREFIX:-Order}
   # Secrets — MUST be provided (no defaults)
   JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
   COOKIE_SECRET: ${COOKIE_SECRET:?COOKIE_SECRET is required}

@@ -4,6 +4,13 @@ import { configureStoreSearch, defineMiddlewares } from '@medusajs/framework/htt
 // the route narrows it to published products in the key's sales channels.
 export default defineMiddlewares({
   routes: [
+    // fork-addition: Alipay signs the raw form body; the signature cannot be
+    // verified after re-serialization, so keep the original bytes available.
+    {
+      method: ['POST'],
+      matcher: '/webhooks/alipay',
+      bodyParser: { preserveRawBody: true },
+    },
     {
       method: ['POST'],
       matcher: '/store/search',
