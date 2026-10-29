@@ -1,10 +1,11 @@
 import { Radio as RadioGroupOption } from "@headlessui/react"
 import { Text, clx } from "@modules/common/components/ui"
-import React, { useContext, type JSX } from "react"
+import React, { useContext } from "react"
 
 import Radio from "@modules/common/components/radio"
 
-import { isManual } from "@lib/constants"
+import { getPaymentInfo, isManual } from "@lib/constants"
+import { getPaymentErrorMessage } from "@lib/util/payment-error"
 import SkeletonCardDetails from "@modules/skeletons/components/skeleton-card-details"
 import { PaymentElement } from "@stripe/react-stripe-js"
 import PaymentTest from "../payment-test"
@@ -14,18 +15,17 @@ type PaymentContainerProps = {
   paymentProviderId: string
   selectedPaymentOptionId: string | null
   disabled?: boolean
-  paymentInfoMap: Record<string, { title: string; icon: JSX.Element }>
   children?: React.ReactNode
 }
 
 const PaymentContainer: React.FC<PaymentContainerProps> = ({
   paymentProviderId,
   selectedPaymentOptionId,
-  paymentInfoMap,
   disabled = false,
   children,
 }) => {
   const isDevelopment = process.env.NODE_ENV === "development"
+  const paymentInfo = getPaymentInfo(paymentProviderId)
 
   return (
     <RadioGroupOption
@@ -44,14 +44,14 @@ const PaymentContainer: React.FC<PaymentContainerProps> = ({
         <div className="flex items-center gap-x-4">
           <Radio checked={selectedPaymentOptionId === paymentProviderId} />
           <Text className="text-base-regular">
-            {paymentInfoMap[paymentProviderId]?.title || paymentProviderId}
+            {paymentInfo?.title || paymentProviderId}
           </Text>
           {isManual(paymentProviderId) && isDevelopment && (
             <PaymentTest className="hidden small:block" />
           )}
         </div>
         <span className="justify-self-end text-ui-fg-base">
-          {paymentInfoMap[paymentProviderId]?.icon}
+          {paymentInfo?.icon}
         </span>
       </div>
       {isManual(paymentProviderId) && isDevelopment && (
@@ -67,7 +67,6 @@ export default PaymentContainer
 export const StripePaymentContainer = ({
   paymentProviderId,
   selectedPaymentOptionId,
-  paymentInfoMap,
   disabled = false,
   setError,
   setPaymentComplete,
@@ -81,7 +80,6 @@ export const StripePaymentContainer = ({
     <PaymentContainer
       paymentProviderId={paymentProviderId}
       selectedPaymentOptionId={selectedPaymentOptionId}
-      paymentInfoMap={paymentInfoMap}
       disabled={disabled}
     >
       {selectedPaymentOptionId === paymentProviderId &&
@@ -103,7 +101,8 @@ export const StripePaymentContainer = ({
               onLoadError={(e) => {
                 setPaymentComplete(false)
                 setError(
-                  e.error?.message ?? "Could not load the payment methods."
+                  getPaymentErrorMessage(e.error) ??
+                    "Could not load the payment methods."
                 )
               }}
             />

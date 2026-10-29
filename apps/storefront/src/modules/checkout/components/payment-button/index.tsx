@@ -8,6 +8,7 @@ import { useElements, useStripe } from "@stripe/react-stripe-js"
 import { useParams } from "next/navigation"
 import React, { useState } from "react"
 import ErrorMessage from "../error-message"
+import { getPaymentErrorMessage } from "@lib/util/payment-error"
 
 type PaymentButtonProps = {
   cart: HttpTypes.StoreCart
@@ -120,7 +121,7 @@ const StripePaymentButton = ({
             return
           }
 
-          setErrorMessage(error.message || null)
+          setErrorMessage(getPaymentErrorMessage(error))
           setSubmitting(false)
           return
         }
@@ -133,6 +134,10 @@ const StripePaymentButton = ({
           return
         }
 
+        setSubmitting(false)
+      })
+      .catch((error) => {
+        setErrorMessage(getPaymentErrorMessage(error))
         setSubmitting(false)
       })
   }
