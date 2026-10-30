@@ -13,10 +13,6 @@ export const paymentInfoMap: Record<
     title: "Credit card",
     icon: <CreditCard />,
   },
-  "pp_medusa-payments_default": {
-    title: "Credit card",
-    icon: <CreditCard />,
-  },
   "pp_stripe-ideal_stripe": {
     title: "iDeal",
     icon: <Ideal />,
@@ -36,11 +32,68 @@ export const paymentInfoMap: Record<
   // Add more payment providers here
 }
 
+/*
+ * Medusa Payments registers one provider per payment account, with the ID
+ * `pp_medusa-payments_{account}`, where `{account}` is the Medusa Cloud payment account ID.
+ */
+const MEDUSA_PAYMENTS_PREFIX = "pp_medusa-payments_"
+
+const medusaPaymentsInfo = {
+  title: "Credit card",
+  icon: <CreditCard />,
+}
+
+/*
+ * Adyen registers its provider with the ID `pp_adyen_{id}`, where `{id}` is the ID set in
+ * `medusa-config.ts`. Its Drop-in offers cards, Apple Pay, and Google Pay.
+ */
+const ADYEN_PREFIX = "pp_adyen_"
+
+const adyenInfo = {
+  title: "Card, Apple Pay, or Google Pay",
+  icon: <CreditCard />,
+}
+
+export const getPaymentInfo = (providerId?: string) => {
+  if (!providerId) {
+    return undefined
+  }
+
+  if (isMedusaPayments(providerId)) {
+    return medusaPaymentsInfo
+  }
+
+  if (isAdyen(providerId)) {
+    return adyenInfo
+  }
+
+  return paymentInfoMap[providerId]
+}
+
+export const isAdyen = (providerId?: string) => {
+  return !!providerId?.startsWith(ADYEN_PREFIX)
+}
+
+export const isMedusaPayments = (providerId?: string) => {
+  return !!providerId?.startsWith(MEDUSA_PAYMENTS_PREFIX)
+}
+
+// Medusa Payments returns the Stripe account that holds the payment, which Stripe.js has to be initialized with.
+// It isn't derived from the provider ID, as non-production environments take payments with a sandbox account.
+export const getMedusaPaymentsAccount = (paymentSession?: {
+  provider_id: string
+  data?: Record<string, unknown>
+}) => {
+  const account = paymentSession?.data?.stripe_account
+  return isMedusaPayments(paymentSession?.provider_id) &&
+    typeof account === "string"
+    ? account
+    : undefined
+}
+
 // This only checks if it is native stripe or medusa payments for card payments, it ignores the other stripe-based providers
 export const isStripeLike = (providerId?: string) => {
-  return (
-    providerId?.startsWith("pp_stripe_") || providerId?.startsWith("pp_medusa-")
-  )
+  return providerId?.startsWith("pp_stripe_") || isMedusaPayments(providerId)
 }
 
 export const isPaypal = (providerId?: string) => {

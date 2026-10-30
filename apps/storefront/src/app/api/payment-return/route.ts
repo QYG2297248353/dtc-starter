@@ -1,4 +1,5 @@
 import { sdk } from "@lib/config"
+import { submitAdyenPayment } from "@lib/data/adyen"
 import { placeOrder } from "@lib/data/cart"
 import { getAuthHeaders, setCartId } from "@lib/data/cookies"
 import { HttpTypes } from "@medusajs/types"
@@ -21,6 +22,23 @@ export async function GET(req: NextRequest) {
   const prefix = countryCode ? `/${countryCode}` : ""
   const rejected = () =>
     NextResponse.redirect(`${origin}${prefix}/cart?error=payment_failed`)
+
+  // Adyen returns the shopper here after a redirect, for example to their bank's
+  // authentication page, with the result to submit to the payment session.
+  const redirectResult = searchParams.get("redirectResult")
+
+  if (cartId && redirectResult) {
+    await setCartId(cartId)
+
+    try {
+      // Redirects to the order confirmation once the payment is authorized.
+      await submitAdyenPayment({ details: { redirectResult } }, cartId)
+    } catch (error) {
+      unstable_rethrow(error)
+    }
+
+    return rejected()
+  }
 
   if (!cartId || !paymentIntent || !paymentIntentClientSecret) {
     return rejected()
