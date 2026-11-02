@@ -1,6 +1,6 @@
 "use client"
 
-import { isAlipay, isAlipayQr, isManual, isStripeLike } from "@lib/constants"
+import { isAdyen, isAlipay, isAlipayQr, isManual, isStripeLike } from "@lib/constants"
 import { placeOrder } from "@lib/data/cart"
 import { HttpTypes } from "@medusajs/types"
 import { Button } from "@modules/common/components/ui"
@@ -8,6 +8,8 @@ import { useElements, useStripe } from "@stripe/react-stripe-js"
 import { useParams } from "next/navigation"
 import React, { useState } from "react"
 import ErrorMessage from "../error-message"
+import { getPaymentErrorMessage } from "@lib/util/payment-error"
+import AdyenPaymentButton from "./adyen-payment-button"
 
 type PaymentButtonProps = {
   cart: HttpTypes.StoreCart
@@ -31,6 +33,14 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
     case isStripeLike(paymentSession?.provider_id):
       return (
         <StripePaymentButton
+          notReady={notReady}
+          cart={cart}
+          data-testid={dataTestId}
+        />
+      )
+    case isAdyen(paymentSession?.provider_id):
+      return (
+        <AdyenPaymentButton
           notReady={notReady}
           cart={cart}
           data-testid={dataTestId}
@@ -128,7 +138,7 @@ const StripePaymentButton = ({
             return
           }
 
-          setErrorMessage(error.message || null)
+          setErrorMessage(getPaymentErrorMessage(error))
           setSubmitting(false)
           return
         }
@@ -141,6 +151,10 @@ const StripePaymentButton = ({
           return
         }
 
+        setSubmitting(false)
+      })
+      .catch((error) => {
+        setErrorMessage(getPaymentErrorMessage(error))
         setSubmitting(false)
       })
   }
