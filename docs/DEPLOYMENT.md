@@ -109,7 +109,7 @@ docker compose pull        # 拉取镜像
 docker compose up -d       # 启动
 ```
 
-启动顺序由 compose 自动控制：`db`/`redis` 健康检查通过 → `migrate` 执行数据库迁移与初始数据后退出 → `backend` 启动并监听 9000。
+启动顺序：`db`/`redis` 健康检查通过 → `backend` 容器启动 → 入口脚本执行 `medusa db:migrate` → 成功后启动 Medusa 服务并监听 9000。迁移失败时容器直接退出，不会带着未迁移的 schema 对外提供服务（详见第七节「启动时迁移」）。
 
 ### 4. 验证
 
@@ -200,7 +200,7 @@ DATABASE_URL=postgres://user:pass@pg.example.com:5432/medusa?sslmode=require
 REDIS_URL=redis://:pass@redis.example.com:6379/0
 ```
 
-然后编辑 `docker-compose.yml`：删除（或注释）不再需要的 `db` / `redis` 服务，以及 `migrate`、`backend` 中对它们的 `depends_on` 条目，最后 `docker compose up -d`。
+然后编辑 `docker-compose.yml`：删除（或注释）不再需要的 `db` / `redis` 服务，以及 `backend` 中对它们的 `depends_on` 条目，最后 `docker compose up -d`。
 
 ### 混合场景
 
@@ -233,6 +233,7 @@ REDIS_URL=redis://:pass@redis.example.com:6379/0
 | `ALIPAY_SUBJECT_PREFIX` | 支付宝订单标题前缀 | 否 | `Order` |
 | `MEDUSA_IMAGE` | 使用的镜像 | 否 | `qyg2297248353/medusa:latest` |
 | `PORT` | 宿主机映射端口 | 否 | `9000` |
+| `RUN_MIGRATIONS` | 容器启动时是否执行 `medusa db:migrate` | 否 | `true` |
 
 > 镜像内不含任何 `.env`，所有配置运行时注入，镜像可安全公开分发。请勿把真实 `.env` 提交进仓库（已被 `.gitignore` 与 `.dockerignore` 排除）。中文配置示例见 [.env.cn.example](../.env.cn.example)。
 
@@ -277,7 +278,7 @@ docker compose exec backend ./node_modules/.bin/medusa exec ./src/scripts/enable
 
 ```bash
 docker compose pull
-docker compose up -d      # migrate 服务会先执行新的数据库迁移，backend 再启动
+docker compose up -d      # backend 启动时先执行新的数据库迁移，成功后再启动服务
 ```
 
 回滚：在 `.env` 中把 `MEDUSA_IMAGE` 固定到上一个可用标签（如 `qyg2297248353/medusa:sha-xxxxxxx`），再 `docker compose up -d`。**注意**：数据库迁移通常不可逆，回滚代码前请确认新旧版本 schema 兼容，生产环境升级前建议先备份数据库。
@@ -289,8 +290,8 @@ docker compose up -d      # migrate 服务会先执行新的数据库迁移，ba
 docker compose logs -f backend
 docker compose ps
 
-# 手动重新执行迁移
-docker compose run --rm migrate
+# 手动重新执行迁移（容器已在运行时）
+docker compose exec backend ./node_modules/.bin/medusa db:migrate
 
 # 进入容器
 docker compose exec backend sh
@@ -304,6 +305,20 @@ docker compose cp backend:/server/static ./static-backup
 # 完全重置（危险：删除内置 PG/Redis 数据卷）
 docker compose down -v
 ```
+
+### 启动时迁移
+
+镜像的启动入口 [docker-entrypoint.sh](../docker-entrypoint.sh) 会先执行 `medusa db:migrate`，成功后才 `exec` 真正的启动命令：
+
+```sh
+[entrypoint] Running database migrations (medusa db:migrate)...
+[entrypoint] Migrations completed.
+```
+
+- **失败即退出**：迁移返回非 0 时脚本立即退出，容器不会启动服务；配合 `restart: unless-stopped`，Docker 会按策略重试（日志中可直接看到迁移报错）。
+- **每次启动都执行**：迁移是幂等的，已应用的迁移会被跳过，因此 `docker compose up -d` / 重启容器都会安全地检查一遍，升级时无需额外手工步骤。
+- **多副本部署**：多个副本同时启动会并发执行迁移。除主实例外，其余副本请在 `.env`（或各自的环境）设置 `RUN_MIGRATIONS=false`，只让一个实例负责迁移；等主实例健康后再启动其余副本。
+- **不想自动迁移**：设置 `RUN_MIGRATIONS=false` 后按需手动执行 `docker compose exec backend ./node_modules/.bin/medusa db:migrate`。
 
 ### 上传文件的存储
 
@@ -326,8 +341,8 @@ docker compose down -v
 **Q: 为什么没有构建 storefront？**
 本项目仅部署 Medusa 后端 API + Admin 后台。Dockerfile 只安装并构建 `@dtc/backend` 工作区，storefront 不参与构建。
 
-**Q: `migrate` 服务报错退出、backend 不启动？**
-先看日志：`docker compose logs migrate`。最常见原因是 `DATABASE_URL` 连不通或外部数据库不存在——Medusa 不自动建库，需先 `CREATE DATABASE`。
+**Q: backend 启动时报迁移错误并退出？**
+先看日志：`docker compose logs backend`，找 `[entrypoint] Running database migrations` 之后的报错。最常见原因是 `DATABASE_URL` 连不通或外部数据库不存在——Medusa 不自动建库，需先 `CREATE DATABASE`。修复后 `docker compose up -d` 即可，容器在 `restart: unless-stopped` 策略下也会自动重试。
 
 **Q: Admin 后台登录失败 / 跨域报错？**
 确认访问 Admin 的地址已包含在 `ADMIN_CORS` 与 `AUTH_CORS` 中（含协议与端口），改完 `.env` 后执行 `docker compose up -d` 使配置生效。

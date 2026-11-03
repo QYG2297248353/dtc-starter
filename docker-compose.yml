@@ -8,8 +8,9 @@
 #   cp .env.example .env   # or export the variables below
 #   docker compose up -d
 #
-# The `migrate` service runs database migrations (medusa db:migrate)
-# once before the backend starts. See docs/DEPLOYMENT.md for details.
+# The backend container runs `medusa db:migrate` on startup and only then
+# starts serving; a failed migration exits the container. See
+# docs/DEPLOYMENT.md for details.
 
 x-backend-env: &backend-env
   NODE_ENV: production
@@ -53,6 +54,9 @@ x-backend-env: &backend-env
   # Secrets — MUST be provided (no defaults)
   JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
   COOKIE_SECRET: ${COOKIE_SECRET:?COOKIE_SECRET is required}
+  # Startup migrations (docker-entrypoint.sh). Set to false on ADDITIONAL
+  # replicas so only one instance migrates; see docs/DEPLOYMENT.md.
+  RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
 
 services:
   db:
@@ -84,17 +88,6 @@ services:
       timeout: 3s
       retries: 10
 
-  # One-shot migration job: runs `medusa db:migrate` (migrations +
-  # initial data seed) against the built server, then exits.
-  migrate:
-    image: ${MEDUSA_IMAGE:-qyg2297248353/medusa:latest}
-    command: ["./node_modules/.bin/medusa", "db:migrate"]
-    environment: *backend-env
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: "no"
-
   backend:
     image: ${MEDUSA_IMAGE:-qyg2297248353/medusa:latest}
     restart: unless-stopped
@@ -112,8 +105,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9000/health || exit 1"]
       interval: 30s

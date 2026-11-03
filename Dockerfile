@@ -54,16 +54,20 @@ COPY --from=builder --chown=medusa:medusa /app/apps/backend/.medusa/server ./
 #   --prod                        skip devDependencies (jest, ts-node, ...)
 #   --ignore-scripts              skip optional postinstalls
 #                                 (@medusajs/telemetry, esbuild, ...)
-#   --config.auto-install-peers   match the repo's .npmrc behavior for
-#                                 @medusajs/draft-order's peer on @medusajs/ui
 # /server/static is where the local file module writes uploaded files at
 # runtime (upload_dir defaults to process.cwd()/static). Create it here so
 # (a) it exists and (b) a volume mounted on it inherits the medusa uid/gid —
 # otherwise Docker creates a root-owned volume and uploads fail with EACCES.
-RUN pnpm install --prod --ignore-scripts --config.auto-install-peers=true \
+RUN pnpm install --prod --ignore-scripts \
     && pnpm store prune \
     && mkdir -p /server/static \
     && chown -R medusa:medusa /server
+
+# Entrypoint runs `medusa db:migrate` and only then starts the server.
+# `sed` strips CRLF so the script works after a Windows checkout.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
+    && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 USER medusa
 
@@ -73,7 +77,8 @@ EXPOSE 9000
 # exclusively via environment variables — see docker-compose.yml and
 # docs/DEPLOYMENT.md.
 #
-# Migrations are NOT run automatically; run them as a one-shot step
-# before starting (docker-compose wires a `migrate` service):
-#   ./node_modules/.bin/medusa db:migrate
+# Migrations run automatically at startup (docker-entrypoint.sh) and abort
+# the start on failure. Set RUN_MIGRATIONS=false to skip them on extra
+# replicas.
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["npm", "run", "start"]

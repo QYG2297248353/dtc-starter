@@ -229,13 +229,13 @@ Medusa 生产模式（`NODE_ENV=production`）默认给 Session Cookie 加 `Secu
 
 **登录接口返回成功但始终跳回登录页？** → 检查 `COOKIE_SECURE` 是否与你的访问协议匹配。HTTP 部署设 `false`，HTTPS 设 `true`。
 
-**`migrate` 服务失败、backend 不启动？** → 先跑 `docker compose logs migrate`。最常见原因：外部数据库不存在（需要先 `CREATE DATABASE medusa;`），或者 `DATABASE_URL` 没加 `?sslmode=disable`（自建 PG 默认不启 SSL）。
+**backend 启动时报迁移错误并退出？** → 先跑 `docker compose logs backend`，看 `[entrypoint] Running database migrations` 之后的报错。最常见原因：外部数据库不存在（需要先 `CREATE DATABASE medusa;`），或者 `DATABASE_URL` 没加 `?sslmode=disable`（自建 PG 默认不启 SSL）。
 
 **登录失败 / 跨域报错？** → 确认实际访问 Admin 的地址（含协议和端口）已包含在 `ADMIN_CORS` 和 `AUTH_CORS` 中。
 
 **上传的图片保存后不显示、地址是 `localhost:9000`？** → 设置 `BACKEND_URL` 为实际访问地址后重启，新上传的图片即正常；存量数据需按 [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md) 里的 SQL 批量替换地址前缀。
 
-**升级怎么做？** → `docker compose pull && docker compose up -d`，`migrate` 会自动执行新的数据库迁移。图片卷 `medusa_static` 不受影响；若从**没有挂载该卷的旧版本**升级，先 `docker compose cp backend:/server/static ./static-backup` 备份，升级后再回灌（步骤见部署文档）。
+**升级怎么做？** → `docker compose pull && docker compose up -d`，backend 启动时会自动执行新的数据库迁移。图片卷 `medusa_static` 不受影响；若从**没有挂载该卷的旧版本**升级，先 `docker compose cp backend:/server/static ./static-backup` 备份，升级后再回灌（步骤见部署文档）。
 
 ---
 

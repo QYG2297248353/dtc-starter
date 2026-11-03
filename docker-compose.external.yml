@@ -5,6 +5,9 @@
 #   cp .env.example .env   # then set DATABASE_URL and REDIS_URL in .env
 #   docker compose -f docker-compose.external.yml up -d
 #
+# The backend container runs `medusa db:migrate` on startup and only then
+# starts serving; a failed migration exits the container.
+#
 # Prerequisites:
 #   - The PostgreSQL database referenced by DATABASE_URL must already exist
 #     (Medusa runs migrations but does NOT create the database itself):
@@ -53,18 +56,11 @@ x-backend-env: &backend-env
   # Secrets — MUST be provided (no defaults)
   JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
   COOKIE_SECRET: ${COOKIE_SECRET:?COOKIE_SECRET is required}
+  # Startup migrations (docker-entrypoint.sh). Set to false on ADDITIONAL
+  # replicas so only one instance migrates; see docs/DEPLOYMENT.md.
+  RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
 
 services:
-  # One-shot migration job: runs `medusa db:migrate` (migrations +
-  # initial data seed) against the built server, then exits.
-  # Re-runs automatically on every `up` after `docker compose pull`
-  # so schema migrations are applied before the new version starts.
-  migrate:
-    image: ${MEDUSA_IMAGE:-qyg2297248353/medusa:latest}
-    command: ["./node_modules/.bin/medusa", "db:migrate"]
-    environment: *backend-env
-    restart: "no"
-
   backend:
     image: ${MEDUSA_IMAGE:-qyg2297248353/medusa:latest}
     restart: unless-stopped
@@ -77,9 +73,6 @@ services:
     # across replicas — use S3 for multi-replica / production setups.
     volumes:
       - medusa_static:/server/static
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9000/health || exit 1"]
       interval: 30s
